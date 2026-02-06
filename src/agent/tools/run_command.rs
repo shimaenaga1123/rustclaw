@@ -182,10 +182,10 @@ impl Tool for RunCommand {
             let name = get_shell_name(&shell);
             (
                 name.to_string(),
-                format!("Execute shell commands using {} shell", name),
+                format!("Execute shell commands using {} shell. If you need programming language runtime, use 'mise' to install it.", name),
             )
         } else {
-            ("bash".to_string(), "Execute shell commands in a sandboxed Docker container. If you need programming language runtime, use 'mise' to install them.".to_string())
+            ("bash".to_string(), "Execute shell commands in a sandboxed Docker container. If you need programming language runtime, use 'mise' to install it.".to_string())
         };
 
         ToolDefinition {
