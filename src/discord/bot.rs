@@ -47,6 +47,10 @@ impl EventHandler for Handler {
             return;
         }
 
+        if let Err(e) = msg.react(&ctx, '👀').await {
+            error!("Failed to add reaction: {}", e);
+        }
+
         let typing = msg.channel_id.start_typing(&ctx.http);
 
         if let Err(e) = self.memory.add_message(&msg.author.name, &content).await {
