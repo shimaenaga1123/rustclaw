@@ -13,7 +13,6 @@ pub struct Config {
     pub context_limit: usize,
     pub context_threshold: f32,
     pub command_timeout: u64,
-    pub sandbox_image: Option<String>,
 }
 
 impl Config {
@@ -42,7 +41,6 @@ impl Config {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(30),
-            sandbox_image: std::env::var("SANDBOX_IMAGE").ok(),
         })
     }
 }

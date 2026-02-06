@@ -6,22 +6,16 @@ use bollard::{
         Config as ContainerConfig, CreateContainerOptions, LogsOptions, RemoveContainerOptions,
         StartContainerOptions, WaitContainerOptions,
     },
+    image::CreateImageOptions,
 };
 use futures_util::StreamExt;
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Duration;
-use tokio::process::Command as TokioCommand;
-use tracing::debug;
+use tracing::{debug, info};
 
-fn get_default_shell() -> String {
-    std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string())
-}
-
-fn get_shell_name(shell_path: &str) -> &str {
-    shell_path.rsplit('/').next().unwrap_or("sh")
-}
+const SANDBOX_IMAGE: &str = "alpine:latest";
 
 #[derive(Deserialize, Serialize)]
 pub struct RunCommandArgs {
@@ -35,42 +29,43 @@ pub struct RunCommand {
 }
 
 impl RunCommand {
-    async fn run_local(&self, command: &str) -> Result<String, ToolError> {
-        let shell = get_default_shell();
-        debug!("Executing locally with {}: {}", shell, command);
+    async fn ensure_image(docker: &Docker) -> Result<(), ToolError> {
+        if docker.inspect_image(SANDBOX_IMAGE).await.is_ok() {
+            return Ok(());
+        }
 
-        let output = tokio::time::timeout(
-            Duration::from_secs(self.config.command_timeout),
-            TokioCommand::new(&shell)
-                .arg("-c")
-                .arg(command)
-                .current_dir(&self.config.data_dir)
-                .output(),
-        )
-        .await
-        .map_err(|_| ToolError::Timeout)??;
+        info!("Pulling sandbox image: {}", SANDBOX_IMAGE);
+        let options = CreateImageOptions {
+            from_image: SANDBOX_IMAGE,
+            ..Default::default()
+        };
 
-        Self::process_output(output)
+        let mut stream = docker.create_image(Some(options), None, None);
+        while let Some(result) = stream.next().await {
+            result.map_err(|e| ToolError::CommandFailed(format!("Image pull failed: {}", e)))?;
+        }
+
+        Ok(())
     }
 
-    async fn run_sandbox(&self, command: &str) -> Result<String, ToolError> {
-        debug!("Executing in sandbox: {}", command);
+    async fn run_in_container(&self, command: &str) -> Result<String, ToolError> {
+        debug!("Executing in Alpine container (owner={}): {}", self.is_owner, command);
 
         let docker = Docker::connect_with_local_defaults()
             .map_err(|e| ToolError::CommandFailed(format!("Docker connection failed: {}", e)))?;
 
+        Self::ensure_image(&docker).await?;
+
         let container_name = format!("sandbox-{}", uuid::Uuid::new_v4());
-        let image = self
-            .config
-            .sandbox_image
-            .as_deref()
-            .unwrap_or("jdxcode/mise:latest");
+
+        // Non-owner: disable network access
+        let network_disabled = !self.is_owner;
 
         let config = ContainerConfig {
-            image: Some(image),
+            image: Some(SANDBOX_IMAGE),
             cmd: Some(vec!["sh", "-c", command]),
             working_dir: Some("/workspace"),
-            network_disabled: Some(false),
+            network_disabled: Some(network_disabled),
             ..Default::default()
         };
 
@@ -89,8 +84,14 @@ impl RunCommand {
             .await
             .map_err(|e| ToolError::CommandFailed(format!("Container start failed: {}", e)))?;
 
+        let timeout_secs = if self.is_owner {
+            self.config.command_timeout
+        } else {
+            self.config.command_timeout.min(15)
+        };
+
         let wait_result = tokio::time::timeout(
-            Duration::from_secs(self.config.command_timeout),
+            Duration::from_secs(timeout_secs),
             docker
                 .wait_container(&container_name, None::<WaitContainerOptions<String>>)
                 .next(),
@@ -108,6 +109,11 @@ impl RunCommand {
 
         while let Some(Ok(log)) = logs.next().await {
             output.push_str(&log.to_string());
+        }
+
+        if !self.is_owner && output.len() > 4096 {
+            output.truncate(4096);
+            output.push_str("\n... (output truncated)");
         }
 
         docker
@@ -140,33 +146,6 @@ impl RunCommand {
             Err(_) => Err(ToolError::Timeout),
         }
     }
-
-    fn process_output(output: std::process::Output) -> Result<String, ToolError> {
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            let stderr = String::from_utf8_lossy(&output.stderr);
-
-            let mut result = String::new();
-            if !stdout.is_empty() {
-                result.push_str(&stdout);
-            }
-            if !stderr.is_empty() {
-                if !result.is_empty() {
-                    result.push('\n');
-                }
-                result.push_str(&stderr);
-            }
-
-            Ok(if result.is_empty() {
-                "Success".to_string()
-            } else {
-                result
-            })
-        } else {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            Err(ToolError::CommandFailed(stderr.to_string()))
-        }
-    }
 }
 
 impl Tool for RunCommand {
@@ -177,26 +156,16 @@ impl Tool for RunCommand {
     type Output = String;
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
-        let (shell_name, description) = if self.is_owner {
-            let shell = get_default_shell();
-            let name = get_shell_name(&shell);
-            (
-                name.to_string(),
-                format!("Execute shell commands using {} shell. If you need programming language runtime, use 'mise' to install it.", name),
-            )
-        } else {
-            ("bash".to_string(), "Execute shell commands in a sandboxed Docker container. If you need programming language runtime, use 'mise' to install it.".to_string())
-        };
-
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description,
+            description: "Execute shell commands in an isolated Alpine Linux Docker container. Use 'apk add' to install packages."
+                .to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": format!("Command to execute (shell: {})", shell_name)
+                        "description": "Command to execute in Alpine Linux container (shell: sh)"
                     }
                 },
                 "required": ["command"]
@@ -205,10 +174,6 @@ impl Tool for RunCommand {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        if self.is_owner {
-            self.run_local(&args.command).await
-        } else {
-            self.run_sandbox(&args.command).await
-        }
+        self.run_in_container(&args.command).await
     }
 }
