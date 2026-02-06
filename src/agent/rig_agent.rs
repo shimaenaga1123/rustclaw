@@ -108,13 +108,18 @@ impl RigAgent {
             config: self.config.clone(),
         };
 
+        let weather = super::tools::Weather {
+            client: reqwest::Client::new(),
+        };
+
         let mut agent_builder = client
             .agent(&self.config.model)
             .preamble(&preamble)
             .max_tokens(4096)
             .tool(run_command)
             .tool(remember)
-            .tool(send_file);
+            .tool(send_file)
+            .tool(weather);
 
         if self.config.brave_api_key.is_some() {
             let web_search = super::tools::WebSearch {

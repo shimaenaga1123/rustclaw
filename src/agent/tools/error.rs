@@ -10,6 +10,8 @@ pub enum ToolError {
     SearchFailed(String),
     #[error("Schedule operation failed: {0}")]
     ScheduleFailed(String),
+    #[error("Weather operation failed: {0}")]
+    WeatherFailed(String),
     #[error("IO error: {0}")]
     Io(#[from] std::io::Error),
     #[error("Timeout")]
