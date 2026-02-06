@@ -6,9 +6,10 @@ A lightweight, memory-aware Discord AI assistant powered by Anthropic-compatible
 
 - **Discord Integration**: Mention-based interaction
 - **Anthropic-compatible API**: Works with Claude, Minimax, and other Anthropic-compatible endpoints via [Rig](https://github.com/0xPlaygrounds/rig)
-- **Dual Memory System**: Automatic short-term/long-term memory management
+- **Dual Memory System**: Automatic short-term/long-term memory with deduplication, auto-archiving, and size limits
 - **Tool Calling**: Shell command execution, web search, and memory operations
-- **Sandboxed Execution**: Non-owner commands run in Docker containers with mise
+- **Sandboxed Execution**: All commands run in isolated Alpine Linux Docker containers
+- **Owner Permission System**: Owner/non-owner distinction with AI-level awareness for safe multi-user operation
 - **Brave Search**: Optional web search integration
 - **Task Scheduler**: Cron-based task scheduling with persistence
 
@@ -17,7 +18,7 @@ A lightweight, memory-aware Discord AI assistant powered by Anthropic-compatible
 - Rust 1.70+
 - Discord Bot Token
 - Anthropic-compatible API Key (Claude, Minimax, etc.)
-- Docker (for sandboxed command execution)
+- Docker (required for all command execution)
 - Brave Search API Key (optional)
 
 ## Quick Start
@@ -41,7 +42,6 @@ API_KEY=your_api_key
 API_URL=https://api.anthropic.com/v1  # or any Anthropic-compatible endpoint
 MODEL=claude-3-5-sonnet-20241022  # or your preferred model
 BRAVE_API_KEY=your_key  # optional
-SANDBOX_IMAGE=jdxcode/mise:latest  # Docker image for sandboxed execution
 ```
 
 ### 3. Create Discord Bot
@@ -52,7 +52,15 @@ SANDBOX_IMAGE=jdxcode/mise:latest  # Docker image for sandboxed execution
 4. Copy token to `.env`
 5. Invite bot with permissions: `View Channels`, `Send Messages`, `Read Message History`
 
-### 4. Run
+### 4. Prepare Docker
+
+Ensure Docker is running. The bot will automatically pull the `alpine:latest` image on first command execution.
+
+```bash
+docker pull alpine:latest  # optional, speeds up first run
+```
+
+### 5. Run
 
 ```bash
 cargo run --release
@@ -99,20 +107,44 @@ Mention the bot in Discord to interact:
 @YourBot remember that I prefer dark mode
 ```
 
+## Permission System
+
+RustClaw distinguishes between the **bot owner** and **regular users**. The AI model is aware of the caller's permission level and adjusts its behavior accordingly.
+
+### Owner
+
+- Full administrative privileges
+- Commands run in Alpine container **with network access**
+- Full command timeout (configurable, default 30s)
+- Can create, list, and **remove** scheduled tasks
+- No output truncation
+
+### Regular Users
+
+- Commands run in Alpine container **without network access**
+- Stricter timeout (max 15s)
+- Output truncated to 4096 characters
+- Can create and list scheduled tasks, but **cannot remove** them
+- AI refuses requests that could affect the host system, reveal internal configuration, or escalate privileges
+
 ## Memory System
 
 ### Short-Term Memory
-- Stores recent conversation history
-- Auto-compresses at 80% of context limit
+- Stores recent conversation history (up to 200 messages)
+- Auto-archives overflow messages to `data/conversations/`
+- Auto-compresses at 80% of context limit via AI summarization
 - Saved to `data/recent.md`
 
 ### Long-Term Memory
-- Extracted via AI summarization
+- Extracted via AI summarization on context compression
 - Manually added via `remember` tool
+- Deduplication: identical or substantially similar entries are skipped
+- Capped at 100 entries, oldest entries removed on overflow
+- Timestamped for traceability
 - Saved to `data/memory.md`
 
 ### Archives
-- Compressed conversations stored in `data/conversations/`
+- Compressed and overflowed conversations stored in `data/conversations/`
 - Named by timestamp: `20260206-143022.md`
 
 ## Tools
@@ -120,13 +152,15 @@ Mention the bot in Discord to interact:
 The bot has access to these tools:
 
 ### `run_command`
-Execute shell commands:
+Execute shell commands in an isolated Alpine Linux Docker container:
 ```
-@YourBot run python --version
+@YourBot run python3 --version
 ```
 
-- **Owner**: Commands run directly on the host system
-- **Others**: Commands run in a sandboxed Docker container with [mise](https://mise.jdx.dev/) for language runtime management
+- All users' commands run inside `alpine:latest` containers
+- Use `apk add` to install packages within the container
+- Owner: network enabled, configurable timeout
+- Others: network disabled, 15s timeout, output capped at 4096 chars
 
 ### `web_search`
 Search the web using Brave API:
@@ -135,10 +169,12 @@ Search the web using Brave API:
 ```
 
 ### `remember`
-Save important information:
+Save important information to long-term memory:
 ```
 @YourBot remember my birthday is January 1st
 ```
+
+Duplicate entries are automatically detected and skipped.
 
 ### `schedule`
 Schedule recurring tasks with cron expressions:
@@ -153,10 +189,12 @@ List all scheduled tasks:
 ```
 
 ### `unschedule`
-Remove a scheduled task:
+Remove a scheduled task (owner only):
 ```
 @YourBot remove schedule abc123
 ```
+
+Non-owner users will receive a permission denied error.
 
 ## Scheduler
 
@@ -195,28 +233,28 @@ rustclaw/
 │   ├── config.rs         # Configuration
 │   ├── agent/
 │   │   ├── mod.rs
-│   │   ├── rig_agent.rs  # AI agent + Rig integration
+│   │   ├── rig_agent.rs  # AI agent + Rig integration + permission-aware preamble
 │   │   └── tools/        # Tool implementations
 │   │       ├── mod.rs
 │   │       ├── error.rs
-│   │       ├── run_command.rs
+│   │       ├── run_command.rs    # Alpine Docker execution
 │   │       ├── remember.rs
 │   │       ├── web_search.rs
 │   │       ├── schedule.rs
-│   │       ├── unschedule.rs
+│   │       ├── unschedule.rs     # Owner-only deletion
 │   │       └── list_schedules.rs
 │   ├── discord/
 │   │   ├── mod.rs
 │   │   └── bot.rs        # Discord event handler
 │   ├── memory/
 │   │   ├── mod.rs
-│   │   └── manager.rs    # Memory management
+│   │   └── manager.rs    # Memory management with dedup & auto-archive
 │   └── scheduler/
 │       ├── mod.rs
 │       └── cron.rs       # Task scheduler
 └── data/
-    ├── recent.md         # Short-term memory
-    ├── memory.md         # Long-term memory
+    ├── recent.md         # Short-term memory (max 200 messages)
+    ├── memory.md         # Long-term memory (max 100 entries)
     ├── schedules.json    # Scheduled tasks
     └── conversations/    # Archives
 ```
@@ -235,8 +273,7 @@ rustclaw/
 | `BRAVE_API_KEY` | ❌ | - | Brave Search API key |
 | `DATA_DIR` | ❌ | `data` | Data directory path |
 | `CONTEXT_LIMIT` | ❌ | `128000` | Token limit |
-| `COMMAND_TIMEOUT` | ❌ | `30` | Command timeout (seconds) |
-| `SANDBOX_IMAGE` | ❌ | `jdxcode/mise:latest` | Docker image for sandboxed execution |
+| `COMMAND_TIMEOUT` | ❌ | `30` | Command timeout in seconds (non-owner capped at 15s) |
 | `RUST_LOG` | ❌ | `info` | Log level |
 
 ## Development
@@ -285,6 +322,12 @@ ls -la data/
 1. Check bot has "Message Content Intent" enabled
 2. Verify bot has proper permissions in the server
 3. Check `RUST_LOG=debug` output for errors
+
+### Commands failing
+
+1. Ensure Docker is running: `docker info`
+2. Check the Alpine image is accessible: `docker run --rm alpine echo ok`
+3. Review logs for container creation errors
 
 ## Contributing
 
