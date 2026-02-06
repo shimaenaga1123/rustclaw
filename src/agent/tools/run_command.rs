@@ -3,9 +3,10 @@ use crate::config::Config;
 use bollard::{
     Docker,
     container::{
-        Config as ContainerConfig, CreateContainerOptions, LogsOptions, RemoveContainerOptions,
-        StartContainerOptions, StopContainerOptions, WaitContainerOptions,
+        Config as ContainerConfig, CreateContainerOptions, RemoveContainerOptions,
+        StartContainerOptions, StopContainerOptions,
     },
+    exec::{CreateExecOptions, StartExecResults},
     image::CreateImageOptions,
     models::HostConfig,
 };
@@ -15,9 +16,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::PathBuf;
 use std::time::Duration;
+use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
 const SANDBOX_IMAGE: &str = "alpine:latest";
+const CONTAINER_NAME: &str = "rustclaw-sandbox";
+
+static CONTAINER_LOCK: std::sync::LazyLock<Mutex<()>> = std::sync::LazyLock::new(|| Mutex::new(()));
 
 #[derive(Deserialize, Serialize)]
 pub struct RunCommandArgs {
@@ -54,27 +59,96 @@ impl RunCommand {
         Ok(())
     }
 
-    async fn collect_logs(docker: &Docker, container_name: &str) -> String {
-        let logs_options = LogsOptions::<String> {
-            stdout: true,
-            stderr: true,
-            ..Default::default()
-        };
+    async fn ensure_container(docker: &Docker, config: &Config) -> Result<(), ToolError> {
+        let _lock = CONTAINER_LOCK.lock().await;
 
-        let mut logs = docker.logs(container_name, Some(logs_options));
-        let mut output = String::new();
+        match docker.inspect_container(CONTAINER_NAME, None).await {
+            Ok(info) => {
+                let running = info.state.as_ref().and_then(|s| s.running).unwrap_or(false);
 
-        while let Some(Ok(log)) = logs.next().await {
-            output.push_str(&log.to_string());
+                if !running {
+                    info!("Sandbox container exists but not running, starting...");
+                    docker
+                        .start_container(CONTAINER_NAME, None::<StartContainerOptions<String>>)
+                        .await
+                        .map_err(|e| {
+                            ToolError::CommandFailed(format!("Container start failed: {}", e))
+                        })?;
+                }
+
+                Ok(())
+            }
+            Err(_) => {
+                info!("Creating persistent sandbox container: {}", CONTAINER_NAME);
+
+                Self::ensure_image(docker).await?;
+
+                let workspace = Self::workspace_path(config);
+                tokio::fs::create_dir_all(&workspace).await.map_err(|e| {
+                    ToolError::CommandFailed(format!("Failed to create workspace: {}", e))
+                })?;
+
+                let workspace_abs = workspace.canonicalize().map_err(|e| {
+                    ToolError::CommandFailed(format!("Failed to resolve workspace path: {}", e))
+                })?;
+
+                let bind = format!("{}:/workspace", workspace_abs.display());
+
+                let host_config = HostConfig {
+                    binds: Some(vec![bind]),
+                    ..Default::default()
+                };
+
+                let container_config = ContainerConfig {
+                    image: Some(SANDBOX_IMAGE),
+                    cmd: Some(vec!["sleep", "infinity"]),
+                    working_dir: Some("/workspace"),
+                    network_disabled: Some(false),
+                    host_config: Some(host_config),
+                    tty: Some(true),
+                    ..Default::default()
+                };
+
+                let options = CreateContainerOptions {
+                    name: CONTAINER_NAME,
+                    platform: None,
+                };
+
+                docker
+                    .create_container(Some(options), container_config)
+                    .await
+                    .map_err(|e| {
+                        ToolError::CommandFailed(format!("Container creation failed: {}", e))
+                    })?;
+
+                docker
+                    .start_container(CONTAINER_NAME, None::<StartContainerOptions<String>>)
+                    .await
+                    .map_err(|e| {
+                        ToolError::CommandFailed(format!("Container start failed: {}", e))
+                    })?;
+
+                info!("Persistent sandbox container started");
+                Ok(())
+            }
         }
-
-        output
     }
 
-    async fn cleanup_container(docker: &Docker, container_name: &str) {
+    #[allow(dead_code)]
+    pub async fn reset_container(config: &Config) -> Result<(), ToolError> {
+        let docker = Docker::connect_with_local_defaults()
+            .map_err(|e| ToolError::CommandFailed(format!("Docker connection failed: {}", e)))?;
+
+        let _lock = CONTAINER_LOCK.lock().await;
+
+        docker
+            .stop_container(CONTAINER_NAME, Some(StopContainerOptions { t: 2 }))
+            .await
+            .ok();
+
         docker
             .remove_container(
-                container_name,
+                CONTAINER_NAME,
                 Some(RemoveContainerOptions {
                     force: true,
                     ..Default::default()
@@ -82,66 +156,39 @@ impl RunCommand {
             )
             .await
             .ok();
+
+        let workspace = Self::workspace_path(config);
+        if workspace.exists() {
+            tokio::fs::remove_dir_all(&workspace).await.ok();
+        }
+
+        info!("Sandbox container reset");
+        Ok(())
     }
 
-    async fn run_in_container(&self, command: &str) -> Result<String, ToolError> {
+    async fn exec_in_container(&self, command: &str) -> Result<String, ToolError> {
         debug!(
-            "Executing in Alpine container (owner={}): {}",
+            "Executing in persistent container (owner={}): {}",
             self.is_owner, command
         );
 
         let docker = Docker::connect_with_local_defaults()
             .map_err(|e| ToolError::CommandFailed(format!("Docker connection failed: {}", e)))?;
 
-        Self::ensure_image(&docker).await?;
+        Self::ensure_container(&docker, &self.config).await?;
 
-        let workspace = Self::workspace_path(&self.config);
-        tokio::fs::create_dir_all(&workspace)
-            .await
-            .map_err(|e| ToolError::CommandFailed(format!("Failed to create workspace: {}", e)))?;
-
-        let workspace_abs = workspace.canonicalize().map_err(|e| {
-            ToolError::CommandFailed(format!("Failed to resolve workspace path: {}", e))
-        })?;
-
-        let container_name = format!("sandbox-{}", uuid::Uuid::new_v4());
-        let network_disabled = !self.is_owner;
-
-        let bind = format!("{}:/workspace", workspace_abs.display());
-
-        let host_config = HostConfig {
-            binds: Some(vec![bind]),
-            ..Default::default()
-        };
-
-        let config = ContainerConfig {
-            image: Some(SANDBOX_IMAGE),
+        let exec_options = CreateExecOptions {
             cmd: Some(vec!["sh", "-c", command]),
+            attach_stdout: Some(true),
+            attach_stderr: Some(true),
             working_dir: Some("/workspace"),
-            network_disabled: Some(network_disabled),
-            host_config: Some(host_config),
             ..Default::default()
         };
 
-        let options = CreateContainerOptions {
-            name: container_name.as_str(),
-            platform: None,
-        };
-
-        docker
-            .create_container(Some(options), config)
+        let exec = docker
+            .create_exec(CONTAINER_NAME, exec_options)
             .await
-            .map_err(|e| ToolError::CommandFailed(format!("Container creation failed: {}", e)))?;
-
-        docker
-            .start_container(&container_name, None::<StartContainerOptions<String>>)
-            .await
-            .map_err(|e| {
-                let docker = docker.clone();
-                let name = container_name.clone();
-                tokio::spawn(async move { Self::cleanup_container(&docker, &name).await });
-                ToolError::CommandFailed(format!("Container start failed: {}", e))
-            })?;
+            .map_err(|e| ToolError::CommandFailed(format!("Exec creation failed: {}", e)))?;
 
         let timeout_secs = if self.is_owner {
             self.config.command_timeout
@@ -149,94 +196,65 @@ impl RunCommand {
             self.config.command_timeout.min(15)
         };
 
-        let wait_options = WaitContainerOptions {
-            condition: "not-running",
-        };
+        let exec_id = exec.id.clone();
 
-        let exit_code = match tokio::time::timeout(Duration::from_secs(timeout_secs), async {
-            let mut stream = docker.wait_container(&container_name, Some(wait_options));
-            stream.next().await
+        match tokio::time::timeout(Duration::from_secs(timeout_secs), async {
+            let start_result = docker
+                .start_exec(&exec.id, None)
+                .await
+                .map_err(|e| ToolError::CommandFailed(format!("Exec start failed: {}", e)))?;
+
+            let mut output = String::new();
+
+            match start_result {
+                StartExecResults::Attached {
+                    output: mut stream, ..
+                } => {
+                    while let Some(Ok(msg)) = stream.next().await {
+                        output.push_str(&msg.to_string());
+                    }
+                }
+                StartExecResults::Detached => {}
+            }
+
+            Ok::<String, ToolError>(output)
         })
         .await
         {
-            Ok(Some(Ok(response))) => Some(response.status_code),
-            Ok(Some(Err(e))) => {
-                warn!(
-                    "Container wait returned error (will still collect logs): {}",
-                    e
-                );
-                docker
-                    .inspect_container(&container_name, None)
-                    .await
-                    .ok()
-                    .and_then(|info| info.state)
-                    .and_then(|s| s.exit_code)
+            Ok(Ok(mut output)) => {
+                let inspect = docker.inspect_exec(&exec_id).await.ok();
+                let exit_code = inspect.and_then(|i| i.exit_code);
+
+                if !self.is_owner && output.len() > 4096 {
+                    output.truncate(4096);
+                    output.push_str("\n... (output truncated)");
+                }
+
+                match exit_code {
+                    Some(0) | None => Ok(if output.is_empty() {
+                        "Success".to_string()
+                    } else {
+                        output
+                    }),
+                    Some(code) => {
+                        if output.is_empty() {
+                            Err(ToolError::CommandFailed(format!(
+                                "Command exited with code {}",
+                                code
+                            )))
+                        } else {
+                            Err(ToolError::CommandFailed(format!(
+                                "(exit code: {})\n{}",
+                                code, output
+                            )))
+                        }
+                    }
+                }
             }
-            Ok(None) => {
-                warn!("Container wait stream ended without result");
-                docker
-                    .inspect_container(&container_name, None)
-                    .await
-                    .ok()
-                    .and_then(|info| info.state)
-                    .and_then(|s| s.exit_code)
-            }
+            Ok(Err(e)) => Err(e),
             Err(_) => {
-                warn!("Container execution timed out after {}s", timeout_secs);
-                docker
-                    .stop_container(&container_name, Some(StopContainerOptions { t: 2 }))
-                    .await
-                    .ok();
-
-                let output = Self::collect_logs(&docker, &container_name).await;
-                Self::cleanup_container(&docker, &container_name).await;
-
-                if output.is_empty() {
-                    return Err(ToolError::Timeout);
-                } else {
-                    return Err(ToolError::CommandFailed(format!(
-                        "(timed out after {}s)\n{}",
-                        timeout_secs, output
-                    )));
-                }
-            }
-        };
-
-        let mut output = Self::collect_logs(&docker, &container_name).await;
-        Self::cleanup_container(&docker, &container_name).await;
-
-        if !self.is_owner && output.len() > 4096 {
-            output.truncate(4096);
-            output.push_str("\n... (output truncated)");
-        }
-
-        match exit_code {
-            Some(0) => Ok(if output.is_empty() {
-                "Success".to_string()
-            } else {
-                output
-            }),
-            Some(code) => {
-                if output.is_empty() {
-                    Err(ToolError::CommandFailed(format!(
-                        "Command exited with code {}",
-                        code
-                    )))
-                } else {
-                    Err(ToolError::CommandFailed(format!(
-                        "(exit code: {})\n{}",
-                        code, output
-                    )))
-                }
-            }
-            None => {
-                if output.is_empty() {
-                    Err(ToolError::CommandFailed(
-                        "Command finished with unknown status and no output".to_string(),
-                    ))
-                } else {
-                    Ok(format!("(exit code unknown)\n{}", output))
-                }
+                warn!("Command execution timed out after {}s", timeout_secs);
+                Err(ToolError::Timeout)
             }
         }
     }
@@ -252,17 +270,16 @@ impl Tool for RunCommand {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description:
-                "Execute shell commands in an isolated Alpine Linux Docker container. \
-                 The /workspace directory is shared between commands — files written there persist across invocations. \
-                 Use 'apk add' to install packages."
-                    .to_string(),
+            description: "Execute shell commands in a persistent Alpine Linux Docker container. \
+                 Installed packages (apk add) and files persist across invocations. \
+                 The /workspace directory is the working directory."
+                .to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "Command to execute in Alpine Linux container (shell: sh). Files saved to /workspace persist."
+                        "description": "Command to execute in Alpine Linux container (shell: sh). Installed packages and files persist."
                     }
                 },
                 "required": ["command"]
@@ -271,6 +288,6 @@ impl Tool for RunCommand {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        self.run_in_container(&args.command).await
+        self.exec_in_container(&args.command).await
     }
 }
