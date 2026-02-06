@@ -4,7 +4,7 @@ use bollard::{
     Docker,
     container::{
         Config as ContainerConfig, CreateContainerOptions, LogsOptions, RemoveContainerOptions,
-        StartContainerOptions, WaitContainerOptions,
+        StartContainerOptions, StopContainerOptions, WaitContainerOptions,
     },
     image::CreateImageOptions,
 };
@@ -13,7 +13,7 @@ use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::time::Duration;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 const SANDBOX_IMAGE: &str = "alpine:latest";
 
@@ -48,6 +48,36 @@ impl RunCommand {
         Ok(())
     }
 
+    async fn collect_logs(docker: &Docker, container_name: &str) -> String {
+        let logs_options = LogsOptions::<String> {
+            stdout: true,
+            stderr: true,
+            ..Default::default()
+        };
+
+        let mut logs = docker.logs(container_name, Some(logs_options));
+        let mut output = String::new();
+
+        while let Some(Ok(log)) = logs.next().await {
+            output.push_str(&log.to_string());
+        }
+
+        output
+    }
+
+    async fn cleanup_container(docker: &Docker, container_name: &str) {
+        docker
+            .remove_container(
+                container_name,
+                Some(RemoveContainerOptions {
+                    force: true,
+                    ..Default::default()
+                }),
+            )
+            .await
+            .ok();
+    }
+
     async fn run_in_container(&self, command: &str) -> Result<String, ToolError> {
         debug!(
             "Executing in Alpine container (owner={}): {}",
@@ -60,8 +90,6 @@ impl RunCommand {
         Self::ensure_image(&docker).await?;
 
         let container_name = format!("sandbox-{}", uuid::Uuid::new_v4());
-
-        // Non-owner: disable network access
         let network_disabled = !self.is_owner;
 
         let config = ContainerConfig {
@@ -85,7 +113,12 @@ impl RunCommand {
         docker
             .start_container(&container_name, None::<StartContainerOptions<String>>)
             .await
-            .map_err(|e| ToolError::CommandFailed(format!("Container start failed: {}", e)))?;
+            .map_err(|e| {
+                let docker = docker.clone();
+                let name = container_name.clone();
+                tokio::spawn(async move { Self::cleanup_container(&docker, &name).await });
+                ToolError::CommandFailed(format!("Container start failed: {}", e))
+            })?;
 
         let timeout_secs = if self.is_owner {
             self.config.command_timeout
@@ -93,60 +126,95 @@ impl RunCommand {
             self.config.command_timeout.min(15)
         };
 
-        let wait_result = tokio::time::timeout(
-            Duration::from_secs(timeout_secs),
-            docker
-                .wait_container(&container_name, None::<WaitContainerOptions<String>>)
-                .next(),
-        )
-        .await;
-
-        let logs_options = LogsOptions::<String> {
-            stdout: true,
-            stderr: true,
-            ..Default::default()
+        let wait_options = WaitContainerOptions {
+            condition: "not-running",
         };
 
-        let mut logs = docker.logs(&container_name, Some(logs_options));
-        let mut output = String::new();
+        let exit_code = match tokio::time::timeout(Duration::from_secs(timeout_secs), async {
+            let mut stream = docker.wait_container(&container_name, Some(wait_options));
+            stream.next().await
+        })
+        .await
+        {
+            Ok(Some(Ok(response))) => Some(response.status_code),
+            Ok(Some(Err(e))) => {
+                warn!(
+                    "Container wait returned error (will still collect logs): {}",
+                    e
+                );
+                docker
+                    .inspect_container(&container_name, None)
+                    .await
+                    .ok()
+                    .and_then(|info| info.state)
+                    .and_then(|s| s.exit_code)
+            }
+            Ok(None) => {
+                warn!("Container wait stream ended without result");
+                docker
+                    .inspect_container(&container_name, None)
+                    .await
+                    .ok()
+                    .and_then(|info| info.state)
+                    .and_then(|s| s.exit_code)
+            }
+            Err(_) => {
+                warn!("Container execution timed out after {}s", timeout_secs);
+                docker
+                    .stop_container(&container_name, Some(StopContainerOptions { t: 2 }))
+                    .await
+                    .ok();
 
-        while let Some(Ok(log)) = logs.next().await {
-            output.push_str(&log.to_string());
-        }
+                let output = Self::collect_logs(&docker, &container_name).await;
+                Self::cleanup_container(&docker, &container_name).await;
+
+                if output.is_empty() {
+                    return Err(ToolError::Timeout);
+                } else {
+                    return Err(ToolError::CommandFailed(format!(
+                        "(timed out after {}s)\n{}",
+                        timeout_secs, output
+                    )));
+                }
+            }
+        };
+
+        let mut output = Self::collect_logs(&docker, &container_name).await;
+        Self::cleanup_container(&docker, &container_name).await;
 
         if !self.is_owner && output.len() > 4096 {
             output.truncate(4096);
             output.push_str("\n... (output truncated)");
         }
 
-        docker
-            .remove_container(
-                &container_name,
-                Some(RemoveContainerOptions {
-                    force: true,
-                    ..Default::default()
-                }),
-            )
-            .await
-            .ok();
-
-        match wait_result {
-            Ok(Some(Ok(result))) => {
-                if result.status_code == 0 {
-                    Ok(if output.is_empty() {
-                        "Success".to_string()
-                    } else {
-                        output
-                    })
+        match exit_code {
+            Some(0) => Ok(if output.is_empty() {
+                "Success".to_string()
+            } else {
+                output
+            }),
+            Some(code) => {
+                if output.is_empty() {
+                    Err(ToolError::CommandFailed(format!(
+                        "Command exited with code {}",
+                        code
+                    )))
                 } else {
-                    Err(ToolError::CommandFailed(output))
+                    Err(ToolError::CommandFailed(format!(
+                        "(exit code: {})\n{}",
+                        code, output
+                    )))
                 }
             }
-            Ok(Some(Err(e))) => Err(ToolError::CommandFailed(e.to_string())),
-            Ok(None) => Err(ToolError::CommandFailed(
-                "Container exited unexpectedly".to_string(),
-            )),
-            Err(_) => Err(ToolError::Timeout),
+            None => {
+                if output.is_empty() {
+                    Err(ToolError::CommandFailed(
+                        "Command finished with unknown status and no output".to_string(),
+                    ))
+                } else {
+                    Ok(format!("(exit code unknown)\n{}", output))
+                }
+            }
         }
     }
 }
@@ -161,8 +229,9 @@ impl Tool for RunCommand {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "Execute shell commands in an isolated Alpine Linux Docker container. Use 'apk add' to install packages."
-                .to_string(),
+            description:
+                "Execute shell commands in an isolated Alpine Linux Docker container. Use 'apk add' to install packages."
+                    .to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
