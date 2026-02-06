@@ -161,7 +161,11 @@ impl MemoryManager {
         let archive_file = archive_path.join(format!("{}.md", timestamp));
 
         fs::write(&archive_file, messages.join("\n")).await?;
-        info!("Archived {} messages to {}", messages.len(), archive_file.display());
+        info!(
+            "Archived {} messages to {}",
+            messages.len(),
+            archive_file.display()
+        );
 
         Ok(())
     }

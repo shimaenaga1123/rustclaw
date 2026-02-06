@@ -49,7 +49,10 @@ impl RunCommand {
     }
 
     async fn run_in_container(&self, command: &str) -> Result<String, ToolError> {
-        debug!("Executing in Alpine container (owner={}): {}", self.is_owner, command);
+        debug!(
+            "Executing in Alpine container (owner={}): {}",
+            self.is_owner, command
+        );
 
         let docker = Docker::connect_with_local_defaults()
             .map_err(|e| ToolError::CommandFailed(format!("Docker connection failed: {}", e)))?;
