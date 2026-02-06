@@ -1,0 +1,31 @@
+# bacon configuration for RustClaw
+# https://dystroy.org/bacon/
+
+[jobs.check]
+command = ["cargo", "check", "--color", "always"]
+need_stdout = false
+
+[jobs.clippy]
+command = ["cargo", "clippy", "--color", "always", "--", "-W", "clippy::pedantic"]
+need_stdout = false
+
+[jobs.test]
+command = ["cargo", "test", "--color", "always"]
+need_stdout = true
+
+[jobs.run]
+command = ["cargo", "run", "--release", "--color", "always"]
+need_stdout = true
+background = true
+allow_warnings = true
+
+[jobs.doc]
+command = ["cargo", "doc", "--no-deps", "--color", "always"]
+need_stdout = false
+
+[keybindings]
+c = "job:check"
+l = "job:clippy"
+t = "job:test"
+r = "job:run"
+d = "job:doc"

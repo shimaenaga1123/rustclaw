@@ -58,6 +58,33 @@ SANDBOX_IMAGE=jdxcode/mise:latest  # Docker image for sandboxed execution
 cargo run --release
 ```
 
+## Installation (Linux Service)
+
+```bash
+./install.sh
+```
+
+Update (stops service, rebuilds, restarts):
+
+```bash
+./install.sh
+```
+
+Manage service:
+
+```bash
+systemctl --user start rustclaw
+systemctl --user stop rustclaw
+systemctl --user status rustclaw
+journalctl --user -u rustclaw -f
+```
+
+Enable auto-start on boot:
+
+```bash
+sudo loginctl enable-linger $USER
+```
+
 ## Usage
 
 Mention the bot in Discord to interact:
@@ -232,6 +259,17 @@ RUST_LOG=debug cargo run
 cargo fmt
 cargo clippy
 ```
+
+### Using Bacon
+
+Install [bacon](https://dystroy.org/bacon/) for continuous checking:
+
+```bash
+cargo install bacon
+bacon
+```
+
+Keybindings: `c` check, `l` clippy, `t` test, `r` run, `d` doc
 
 ## Troubleshooting
 

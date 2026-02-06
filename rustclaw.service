@@ -1,0 +1,20 @@
+[Unit]
+Description=RustClaw Discord Bot
+Documentation=https://github.com/shimaenaga1123/rustclaw
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%INSTALL_DIR%
+ExecStart=%INSTALL_DIR%/rustclaw
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+# Environment file
+EnvironmentFile=%INSTALL_DIR%/.env
+
+[Install]
+WantedBy=default.target
