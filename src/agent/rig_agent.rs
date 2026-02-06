@@ -141,7 +141,7 @@ impl RigAgent {
                 .tool(list_schedules);
         }
 
-        let agent = agent_builder.default_max_turns(10).build();
+        let agent = agent_builder.default_max_turns(50).build();
 
         let response = agent.prompt(full_prompt).await?;
 
