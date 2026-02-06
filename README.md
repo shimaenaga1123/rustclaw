@@ -270,4 +270,4 @@ MIT License - see [LICENSE](LICENSE) for details
 
 ## Support
 
-- Issues: [GitHub Issues](https://github.com/shimaenga1123/rustclaw/issues)
+- Issues: [GitHub Issues](https://github.com/shimaenaga1123/rustclaw/issues)
