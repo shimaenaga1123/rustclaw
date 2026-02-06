@@ -1,9 +1,21 @@
 use crate::{config::Config, memory::MemoryManager, scheduler::Scheduler};
 use anyhow::Result;
 use rig::{client::CompletionClient, completion::Prompt, providers::anthropic::Client};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 use tracing::info;
+
+#[derive(Debug, Clone)]
+pub struct PendingFile {
+    pub filename: String,
+    pub path: PathBuf,
+}
+
+pub struct AgentResponse {
+    pub text: String,
+    pub files: Vec<PendingFile>,
+}
 
 pub struct RigAgent {
     config: Config,
@@ -25,22 +37,29 @@ impl RigAgent {
     }
 
     fn build_preamble(&self, is_owner: bool) -> String {
+        let base = "You are a helpful AI assistant running inside a Discord bot.";
+
         if is_owner {
-            "You are a helpful AI assistant. \
-             The current user is the **bot owner** with full administrative privileges. \
-             You may execute any command, manage schedules, and perform system operations as requested."
-                .to_string()
+            format!(
+                "{} The current user is the **bot owner** with full administrative privileges. \
+                 You may execute any command, manage schedules, and perform system operations as requested. \
+                 When command output or generated content is too long for a Discord message, \
+                 use the send_file tool to send it as a file attachment.",
+                base
+            )
         } else {
-            "You are a helpful AI assistant. \
-             The current user is a **regular user** (not the bot owner). \
-             IMPORTANT RESTRICTIONS for this user:\n\
-             - Do NOT execute commands that could affect the host system, install persistent software, or access sensitive data.\n\
-             - Do NOT remove or modify scheduled tasks (only the owner can do this).\n\
-             - Do NOT reveal system configuration, file paths, environment variables, or any internal details.\n\
-             - Do NOT attempt to escalate privileges or bypass sandbox restrictions.\n\
-             - Keep command execution to safe, read-only, or computational tasks.\n\
-             - If the user requests something restricted, politely explain that it requires owner permissions."
-                .to_string()
+            format!(
+                "{} The current user is a **regular user** (not the bot owner). \
+                 IMPORTANT RESTRICTIONS for this user:\n\
+                 - Do NOT execute commands that could affect the host system, install persistent software, or access sensitive data.\n\
+                 - Do NOT remove or modify scheduled tasks (only the owner can do this).\n\
+                 - Do NOT reveal system configuration, file paths, environment variables, or any internal details.\n\
+                 - Do NOT attempt to escalate privileges or bypass sandbox restrictions.\n\
+                 - Keep command execution to safe, read-only, or computational tasks.\n\
+                 - If the user requests something restricted, politely explain that it requires owner permissions.\n\
+                 - When command output or generated content is too long, use the send_file tool to send it as a file attachment.",
+                base
+            )
         }
     }
 
@@ -49,7 +68,7 @@ impl RigAgent {
         user_input: &str,
         is_owner: bool,
         discord_channel_id: Option<u64>,
-    ) -> Result<String> {
+    ) -> Result<AgentResponse> {
         let context = self.memory.get_context().await?;
 
         let token_count = self.estimate_tokens(&context, user_input);
@@ -73,6 +92,7 @@ impl RigAgent {
             .build()?;
 
         let preamble = self.build_preamble(is_owner);
+        let pending_files = Arc::new(RwLock::new(Vec::new()));
 
         let run_command = super::tools::RunCommand {
             config: self.config.clone(),
@@ -83,12 +103,18 @@ impl RigAgent {
             memory: self.memory.clone(),
         };
 
+        let send_file = super::tools::SendFile {
+            pending_files: pending_files.clone(),
+            config: self.config.clone(),
+        };
+
         let mut agent_builder = client
             .agent(&self.config.model)
             .preamble(&preamble)
             .max_tokens(4096)
             .tool(run_command)
-            .tool(remember);
+            .tool(remember)
+            .tool(send_file);
 
         if self.config.brave_api_key.is_some() {
             let web_search = super::tools::WebSearch {
@@ -121,7 +147,12 @@ impl RigAgent {
 
         self.memory.add_assistant_message(&response).await?;
 
-        Ok(response.to_string())
+        let files = pending_files.read().await.clone();
+
+        Ok(AgentResponse {
+            text: response.to_string(),
+            files,
+        })
     }
 
     async fn summarize_context(&self, context: &str) -> Result<String> {
@@ -132,7 +163,10 @@ impl RigAgent {
 
         let agent = client
             .agent(&self.config.model)
-            .preamble("Summarize only the key points of the conversation. Be concise but preserve important facts, user preferences, and decisions made.")
+            .preamble(
+                "Summarize only the key points of the conversation. \
+                 Be concise but preserve important facts, user preferences, and decisions made.",
+            )
             .max_tokens(4096)
             .build();
 

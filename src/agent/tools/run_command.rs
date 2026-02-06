@@ -7,11 +7,13 @@ use bollard::{
         StartContainerOptions, StopContainerOptions, WaitContainerOptions,
     },
     image::CreateImageOptions,
+    models::HostConfig,
 };
 use futures_util::StreamExt;
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::path::PathBuf;
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
@@ -29,6 +31,10 @@ pub struct RunCommand {
 }
 
 impl RunCommand {
+    pub fn workspace_path(config: &Config) -> PathBuf {
+        config.data_dir.join("workspace")
+    }
+
     async fn ensure_image(docker: &Docker) -> Result<(), ToolError> {
         if docker.inspect_image(SANDBOX_IMAGE).await.is_ok() {
             return Ok(());
@@ -89,14 +95,31 @@ impl RunCommand {
 
         Self::ensure_image(&docker).await?;
 
+        let workspace = Self::workspace_path(&self.config);
+        tokio::fs::create_dir_all(&workspace)
+            .await
+            .map_err(|e| ToolError::CommandFailed(format!("Failed to create workspace: {}", e)))?;
+
+        let workspace_abs = workspace.canonicalize().map_err(|e| {
+            ToolError::CommandFailed(format!("Failed to resolve workspace path: {}", e))
+        })?;
+
         let container_name = format!("sandbox-{}", uuid::Uuid::new_v4());
         let network_disabled = !self.is_owner;
+
+        let bind = format!("{}:/workspace", workspace_abs.display());
+
+        let host_config = HostConfig {
+            binds: Some(vec![bind]),
+            ..Default::default()
+        };
 
         let config = ContainerConfig {
             image: Some(SANDBOX_IMAGE),
             cmd: Some(vec!["sh", "-c", command]),
             working_dir: Some("/workspace"),
             network_disabled: Some(network_disabled),
+            host_config: Some(host_config),
             ..Default::default()
         };
 
@@ -230,14 +253,16 @@ impl Tool for RunCommand {
         ToolDefinition {
             name: Self::NAME.to_string(),
             description:
-                "Execute shell commands in an isolated Alpine Linux Docker container. Use 'apk add' to install packages."
+                "Execute shell commands in an isolated Alpine Linux Docker container. \
+                 The /workspace directory is shared between commands — files written there persist across invocations. \
+                 Use 'apk add' to install packages."
                     .to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "Command to execute in Alpine Linux container (shell: sh)"
+                        "description": "Command to execute in Alpine Linux container (shell: sh). Files saved to /workspace persist."
                     }
                 },
                 "required": ["command"]

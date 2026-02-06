@@ -124,7 +124,7 @@ impl MemoryManager {
                 .trim()
                 .to_lowercase()
                 .split(']')
-                .last()
+                .next_back()
                 .unwrap_or(entry)
                 .trim()
                 .to_string();

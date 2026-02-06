@@ -3,7 +3,7 @@ use anyhow::Result;
 use chrono_tz::Tz;
 use iana_time_zone::get_timezone;
 use serde::{Deserialize, Serialize};
-use serenity::all::{ChannelId, Http};
+use serenity::all::{ChannelId, CreateAttachment, CreateMessage, Http};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -12,6 +12,8 @@ use tokio::sync::RwLock;
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::{error, info};
 use uuid::Uuid;
+
+const DISCORD_MAX_LEN: usize = 2000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScheduledTask {
@@ -25,6 +27,44 @@ pub struct ScheduledTask {
     pub discord_channel_id: Option<u64>,
 }
 
+fn split_message(text: &str, max_len: usize) -> Vec<String> {
+    if text.len() <= max_len {
+        return vec![text.to_string()];
+    }
+
+    let mut chunks = Vec::new();
+    let mut remaining = text;
+
+    while !remaining.is_empty() {
+        if remaining.len() <= max_len {
+            chunks.push(remaining.to_string());
+            break;
+        }
+
+        let split_at = remaining[..max_len]
+            .rfind('\n')
+            .map(|i| i + 1)
+            .unwrap_or_else(|| {
+                remaining[..max_len]
+                    .rfind(' ')
+                    .map(|i| i + 1)
+                    .unwrap_or(max_len)
+            });
+
+        let chunk = &remaining[..split_at];
+        if !chunk.trim().is_empty() {
+            chunks.push(chunk.to_string());
+        }
+        remaining = &remaining[split_at..];
+    }
+
+    if chunks.is_empty() {
+        chunks.push(text.chars().take(max_len).collect());
+    }
+
+    chunks
+}
+
 pub struct Scheduler {
     agent: Arc<RigAgent>,
     scheduler: JobScheduler,
@@ -36,7 +76,7 @@ pub struct Scheduler {
 
 impl Scheduler {
     fn normalize_cron_expr(cron_expr: &str) -> String {
-        let parts: Vec<&str> = cron_expr.trim().split_whitespace().collect();
+        let parts: Vec<&str> = cron_expr.split_whitespace().collect();
         if parts.len() == 5 {
             format!("0 {}", cron_expr.trim())
         } else {
@@ -96,16 +136,39 @@ impl Scheduler {
             let discord_http = discord_http.clone();
             Box::pin(async move {
                 info!("Running scheduled task: {}", task_id);
-                match agent.process(&prompt, is_owner, None).await {
+                match agent.process(&prompt, is_owner, discord_channel_id).await {
                     Ok(response) => {
-                        if let Some(channel_id) = discord_channel_id {
-                            if let Some(http) = discord_http.read().await.as_ref() {
-                                let channel = ChannelId::new(channel_id);
-                                if let Err(e) = channel.say(http, &response).await {
+                        if let Some(channel_id) = discord_channel_id
+                            && let Some(http) = discord_http.read().await.as_ref()
+                        {
+                            let channel = ChannelId::new(channel_id);
+
+                            for chunk in split_message(&response.text, DISCORD_MAX_LEN) {
+                                if let Err(e) = channel.say(http, &chunk).await {
                                     error!(
                                         "Failed to send scheduled task result to Discord: {}",
                                         e
                                     );
+                                }
+                            }
+
+                            for file in &response.files {
+                                match CreateAttachment::path(&file.path).await {
+                                    Ok(attachment) => {
+                                        let builder = CreateMessage::new().add_file(attachment);
+                                        if let Err(e) = channel.send_message(http, builder).await {
+                                            error!(
+                                                "Failed to send scheduled file '{}': {}",
+                                                file.filename, e
+                                            );
+                                        }
+                                    }
+                                    Err(e) => {
+                                        error!(
+                                            "Failed to create attachment for '{}': {}",
+                                            file.filename, e
+                                        );
+                                    }
                                 }
                             }
                         }

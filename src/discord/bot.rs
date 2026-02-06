@@ -1,12 +1,16 @@
 use crate::{agent::RigAgent, config::Config, memory::MemoryManager, scheduler::Scheduler};
 use anyhow::Result;
 use serenity::{
+    all::CreateAttachment,
     async_trait,
+    builder::CreateMessage,
     model::{channel::Message, gateway::Ready, id::UserId},
     prelude::*,
 };
 use std::sync::Arc;
 use tracing::{error, info};
+
+const DISCORD_MAX_LEN: usize = 2000;
 
 pub struct Bot {
     config: Config,
@@ -21,6 +25,44 @@ struct Handler {
     bot_id: Arc<RwLock<Option<UserId>>>,
     owner_id: UserId,
     scheduler: Arc<Scheduler>,
+}
+
+fn split_message(text: &str, max_len: usize) -> Vec<String> {
+    if text.len() <= max_len {
+        return vec![text.to_string()];
+    }
+
+    let mut chunks = Vec::new();
+    let mut remaining = text;
+
+    while !remaining.is_empty() {
+        if remaining.len() <= max_len {
+            chunks.push(remaining.to_string());
+            break;
+        }
+
+        let split_at = remaining[..max_len]
+            .rfind('\n')
+            .map(|i| i + 1)
+            .unwrap_or_else(|| {
+                remaining[..max_len]
+                    .rfind(' ')
+                    .map(|i| i + 1)
+                    .unwrap_or(max_len)
+            });
+
+        let chunk = &remaining[..split_at];
+        if !chunk.trim().is_empty() {
+            chunks.push(chunk.to_string());
+        }
+        remaining = &remaining[split_at..];
+    }
+
+    if chunks.is_empty() {
+        chunks.push(text.chars().take(max_len).collect());
+    }
+
+    chunks
 }
 
 #[async_trait]
@@ -70,8 +112,37 @@ impl EventHandler for Handler {
         {
             Ok(response) => {
                 typing.stop();
-                if let Err(e) = msg.reply(&ctx, response).await {
-                    error!("Failed to send message: {}", e);
+
+                let chunks = split_message(&response.text, DISCORD_MAX_LEN);
+                for (i, chunk) in chunks.iter().enumerate() {
+                    let result = if i == 0 {
+                        msg.reply(&ctx, chunk).await
+                    } else {
+                        msg.channel_id.say(&ctx.http, chunk).await
+                    };
+                    if let Err(e) = result {
+                        error!("Failed to send message chunk {}: {}", i, e);
+                    }
+                }
+
+                for file in &response.files {
+                    match CreateAttachment::path(&file.path).await {
+                        Ok(attachment) => {
+                            let builder = CreateMessage::new().add_file(attachment);
+                            if let Err(e) = msg.channel_id.send_message(&ctx.http, builder).await {
+                                error!("Failed to send file '{}': {}", file.filename, e);
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to create attachment for '{}': {}", file.filename, e);
+                        }
+                    }
+
+                    if file.path.to_string_lossy().contains("/tmp/")
+                        && let Err(e) = tokio::fs::remove_file(&file.path).await
+                    {
+                        error!("Failed to clean up temp file: {}", e);
+                    }
                 }
             }
             Err(e) => {
