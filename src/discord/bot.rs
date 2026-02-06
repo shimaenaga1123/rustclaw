@@ -1,4 +1,4 @@
-use crate::{agent::RigAgent, config::Config, memory::MemoryManager};
+use crate::{agent::RigAgent, config::Config, memory::MemoryManager, scheduler::Scheduler};
 use anyhow::Result;
 use serenity::{
     async_trait,
@@ -12,6 +12,7 @@ pub struct Bot {
     config: Config,
     agent: Arc<RigAgent>,
     memory: Arc<MemoryManager>,
+    scheduler: Arc<Scheduler>,
 }
 
 struct Handler {
@@ -19,6 +20,7 @@ struct Handler {
     memory: Arc<MemoryManager>,
     bot_id: Arc<RwLock<Option<UserId>>>,
     owner_id: UserId,
+    scheduler: Arc<Scheduler>,
 }
 
 #[async_trait]
@@ -61,7 +63,11 @@ impl EventHandler for Handler {
 
         let is_owner = msg.author.id == self.owner_id;
 
-        match self.agent.process(&content, is_owner).await {
+        match self
+            .agent
+            .process(&content, is_owner, Some(msg.channel_id.get()))
+            .await
+        {
             Ok(response) => {
                 typing.stop();
                 if let Err(e) = msg.reply(&ctx, response).await {
@@ -78,9 +84,10 @@ impl EventHandler for Handler {
         }
     }
 
-    async fn ready(&self, _: Context, ready: Ready) {
+    async fn ready(&self, ctx: Context, ready: Ready) {
         info!("Bot connected as {}", ready.user.name);
         *self.bot_id.write().await = Some(ready.user.id);
+        self.scheduler.set_discord_http(ctx.http).await;
     }
 }
 
@@ -89,11 +96,13 @@ impl Bot {
         config: Config,
         agent: Arc<RigAgent>,
         memory: Arc<MemoryManager>,
+        scheduler: Arc<Scheduler>,
     ) -> Result<Self> {
         Ok(Self {
             config,
             agent,
             memory,
+            scheduler,
         })
     }
 
@@ -107,6 +116,7 @@ impl Bot {
             memory: self.memory,
             bot_id: Arc::new(RwLock::new(None)),
             owner_id: UserId::new(self.config.owner_id),
+            scheduler: self.scheduler,
         };
 
         let mut client = Client::builder(&self.config.discord_token, intents)

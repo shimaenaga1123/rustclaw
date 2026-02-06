@@ -24,7 +24,12 @@ impl RigAgent {
         *self.scheduler.write().await = Some(scheduler);
     }
 
-    pub async fn process(&self, user_input: &str, is_owner: bool) -> Result<String> {
+    pub async fn process(
+        &self,
+        user_input: &str,
+        is_owner: bool,
+        discord_channel_id: Option<u64>,
+    ) -> Result<String> {
         let context = self.memory.get_context().await?;
 
         let token_count = self.estimate_tokens(&context, user_input);
@@ -71,11 +76,11 @@ impl RigAgent {
             agent_builder = agent_builder.tool(web_search);
         }
 
-        // Add scheduler tools if scheduler is available
         if let Some(scheduler) = self.scheduler.read().await.clone() {
             let schedule = super::tools::Schedule {
                 scheduler: scheduler.clone(),
                 is_owner,
+                discord_channel_id,
             };
             let unschedule = super::tools::Unschedule {
                 scheduler: scheduler.clone(),

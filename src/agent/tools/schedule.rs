@@ -16,6 +16,7 @@ pub struct ScheduleArgs {
 pub struct Schedule {
     pub scheduler: Arc<Scheduler>,
     pub is_owner: bool,
+    pub discord_channel_id: Option<u64>,
 }
 
 impl Tool for Schedule {
@@ -58,6 +59,7 @@ impl Tool for Schedule {
                 &args.prompt,
                 &args.description,
                 self.is_owner,
+                self.discord_channel_id,
             )
             .await
             .map_err(|e| ToolError::ScheduleFailed(e.to_string()))?;

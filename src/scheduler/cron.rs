@@ -1,6 +1,9 @@
 use crate::agent::RigAgent;
 use anyhow::Result;
+use chrono_tz::Tz;
+use iana_time_zone::get_timezone;
 use serde::{Deserialize, Serialize};
+use serenity::all::{ChannelId, Http};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -18,6 +21,8 @@ pub struct ScheduledTask {
     pub description: String,
     #[serde(default)]
     pub is_owner: bool,
+    #[serde(default)]
+    pub discord_channel_id: Option<u64>,
 }
 
 pub struct Scheduler {
@@ -26,9 +31,19 @@ pub struct Scheduler {
     tasks: Arc<RwLock<HashMap<String, ScheduledTask>>>,
     job_ids: Arc<RwLock<HashMap<String, uuid::Uuid>>>,
     data_path: PathBuf,
+    discord_http: Arc<RwLock<Option<Arc<Http>>>>,
 }
 
 impl Scheduler {
+    fn normalize_cron_expr(cron_expr: &str) -> String {
+        let parts: Vec<&str> = cron_expr.trim().split_whitespace().collect();
+        if parts.len() == 5 {
+            format!("0 {}", cron_expr.trim())
+        } else {
+            cron_expr.to_string()
+        }
+    }
+
     pub async fn new(data_dir: &PathBuf, agent: Arc<RigAgent>) -> Result<Arc<Self>> {
         let scheduler = JobScheduler::new().await?;
         let data_path = data_dir.join("schedules.json");
@@ -39,6 +54,7 @@ impl Scheduler {
             tasks: Arc::new(RwLock::new(HashMap::new())),
             job_ids: Arc::new(RwLock::new(HashMap::new())),
             data_path,
+            discord_http: Arc::new(RwLock::new(None)),
         });
 
         instance.load_tasks().await?;
@@ -60,20 +76,43 @@ impl Scheduler {
         Ok(())
     }
 
+    pub async fn set_discord_http(&self, http: Arc<Http>) {
+        *self.discord_http.write().await = Some(http);
+    }
+
     async fn register_job(&self, task: &ScheduledTask) -> Result<()> {
         let agent = self.agent.clone();
         let prompt = task.prompt.clone();
         let task_id = task.id.clone();
         let is_owner = task.is_owner;
+        let discord_channel_id = task.discord_channel_id;
+        let discord_http = self.discord_http.clone();
+        let timezone: Tz = get_timezone()?.parse()?;
 
-        let job = Job::new_async(task.cron_expr.as_str(), move |_uuid, _l| {
+        let job = Job::new_async_tz(task.cron_expr.as_str(), timezone, move |_uuid, _l| {
             let agent = agent.clone();
             let prompt = prompt.clone();
             let task_id = task_id.clone();
+            let discord_http = discord_http.clone();
             Box::pin(async move {
                 info!("Running scheduled task: {}", task_id);
-                if let Err(e) = agent.process(&prompt, is_owner).await {
-                    error!("Scheduled task {} failed: {}", task_id, e);
+                match agent.process(&prompt, is_owner, None).await {
+                    Ok(response) => {
+                        if let Some(channel_id) = discord_channel_id {
+                            if let Some(http) = discord_http.read().await.as_ref() {
+                                let channel = ChannelId::new(channel_id);
+                                if let Err(e) = channel.say(http, &response).await {
+                                    error!(
+                                        "Failed to send scheduled task result to Discord: {}",
+                                        e
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Scheduled task {} failed: {}", task_id, e);
+                    }
                 }
             })
         })?;
@@ -90,8 +129,13 @@ impl Scheduler {
         prompt: &str,
         description: &str,
         is_owner: bool,
+        discord_channel_id: Option<u64>,
     ) -> Result<String> {
-        Job::new_async(cron_expr, |_, _| Box::pin(async {}))?;
+        let cron_expr = Self::normalize_cron_expr(cron_expr);
+        let cron_expr = cron_expr.as_str();
+        let timezone: Tz = get_timezone()?.parse()?;
+
+        Job::new_async_tz(cron_expr, timezone, |_, _| Box::pin(async {}))?;
 
         let task = ScheduledTask {
             id: Uuid::new_v4().to_string()[..8].to_string(),
@@ -99,6 +143,7 @@ impl Scheduler {
             prompt: prompt.to_string(),
             description: description.to_string(),
             is_owner,
+            discord_channel_id,
         };
 
         let task_id = task.id.clone();

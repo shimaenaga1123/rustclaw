@@ -27,7 +27,7 @@ async fn main() -> Result<()> {
     agent.set_scheduler(scheduler.clone()).await;
     scheduler.start().await?;
 
-    let discord_bot = discord::Bot::new(config, agent, memory_manager).await?;
+    let discord_bot = discord::Bot::new(config, agent, memory_manager, scheduler).await?;
     discord_bot.start().await?;
 
     Ok(())
