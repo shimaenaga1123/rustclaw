@@ -19,7 +19,7 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
-const SANDBOX_IMAGE: &str = "alpine:latest";
+const SANDBOX_IMAGE: &str = "oven/bun:debian";
 const CONTAINER_NAME: &str = "rustclaw-sandbox";
 
 static CONTAINER_LOCK: std::sync::LazyLock<Mutex<()>> = std::sync::LazyLock::new(|| Mutex::new(()));
@@ -134,7 +134,6 @@ impl RunCommand {
         }
     }
 
-    #[allow(dead_code)]
     pub async fn reset_container(config: &Config) -> Result<(), ToolError> {
         let docker = Docker::connect_with_local_defaults()
             .map_err(|e| ToolError::CommandFailed(format!("Docker connection failed: {}", e)))?;
@@ -178,7 +177,7 @@ impl RunCommand {
         Self::ensure_container(&docker, &self.config).await?;
 
         let exec_options = CreateExecOptions {
-            cmd: Some(vec!["sh", "-c", command]),
+            cmd: Some(vec!["bash", "-c", command]),
             attach_stdout: Some(true),
             attach_stderr: Some(true),
             working_dir: Some("/workspace"),
@@ -270,16 +269,16 @@ impl Tool for RunCommand {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "Execute shell commands in a persistent Alpine Linux Docker container. \
-                 Installed packages (apk add) and files persist across invocations. \
-                 The /workspace directory is the working directory."
+            description: "Execute shell commands in a persistent Debian Docker container with Bun runtime. \
+                 Installed packages (apt-get install) and files persist across invocations. \
+                 The /workspace directory is the working directory. Bun is pre-installed. Use bun as Node.js runtime and package manager."
                 .to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "Command to execute in Alpine Linux container (shell: sh). Installed packages and files persist."
+                        "description": "Command to execute in Debian container with Bun (shell: bash). Installed packages and files persist."
                     }
                 },
                 "required": ["command"]
@@ -289,5 +288,41 @@ impl Tool for RunCommand {
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         self.exec_in_container(&args.command).await
+    }
+}
+
+#[derive(Deserialize, Serialize)]
+pub struct ResetContainerArgs {}
+
+#[derive(Clone)]
+pub struct ResetContainer {
+    pub config: Config,
+}
+
+impl Tool for ResetContainer {
+    const NAME: &'static str = "reset_container";
+
+    type Error = ToolError;
+    type Args = ResetContainerArgs;
+    type Output = String;
+
+    async fn definition(&self, _prompt: String) -> ToolDefinition {
+        ToolDefinition {
+            name: Self::NAME.to_string(),
+            description: "Reset the Docker sandbox container. This stops and removes the current container, \
+                 clears the workspace directory, and allows a fresh container to be created on the next command. \
+                 Use this when the container is in a broken state or needs a clean restart."
+                .to_string(),
+            parameters: json!({
+                "type": "object",
+                "properties": {},
+                "required": []
+            }),
+        }
+    }
+
+    async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
+        RunCommand::reset_container(&self.config).await?;
+        Ok("Container reset successfully. A new container will be created on the next command.".to_string())
     }
 }

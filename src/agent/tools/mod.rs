@@ -10,7 +10,7 @@ mod web_search;
 
 pub use list_schedules::ListSchedules;
 pub use remember::Remember;
-pub use run_command::RunCommand;
+pub use run_command::{ResetContainer, RunCommand};
 pub use schedule::Schedule;
 pub use send_file::SendFile;
 pub use unschedule::Unschedule;

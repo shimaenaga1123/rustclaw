@@ -8,7 +8,7 @@ A lightweight, memory-aware Discord AI assistant powered by Anthropic-compatible
 - **Anthropic-compatible API**: Works with Claude, Minimax, and other Anthropic-compatible endpoints via [Rig](https://github.com/0xPlaygrounds/rig)
 - **Dual Memory System**: Automatic short-term/long-term memory with deduplication, auto-archiving, and size limits
 - **Tool Calling**: Shell command execution, web search, and memory operations
-- **Sandboxed Execution**: All commands run in isolated Alpine Linux Docker containers
+- **Sandboxed Execution**: All commands run in isolated Debian Docker containers with Bun runtime
 - **Owner Permission System**: Owner/non-owner distinction with AI-level awareness for safe multi-user operation
 - **Brave Search**: Optional web search integration
 - **Task Scheduler**: Cron-based task scheduling with persistence
@@ -45,10 +45,10 @@ Edit `config.toml` with your credentials. See `config.example.toml` for all opti
 
 ### 4. Prepare Docker
 
-Ensure Docker is running. The bot will automatically pull the `alpine:latest` image on first command execution.
+Ensure Docker is running. The bot will automatically pull the `oven/bun:debian` image on first command execution.
 
 ```bash
-docker pull alpine:latest  # optional, speeds up first run
+docker pull oven/bun:debian  # optional, speeds up first run
 ```
 
 ### 5. Run
@@ -105,14 +105,15 @@ RustClaw distinguishes between the **bot owner** and **regular users**. The AI m
 ### Owner
 
 - Full administrative privileges
-- Commands run in Alpine container **with network access**
+- Commands run in Debian/Bun container
 - Full command timeout (configurable, default 30s)
 - Can create, list, and **remove** scheduled tasks
+- Can **reset** the Docker container
 - No output truncation
 
 ### Regular Users
 
-- Commands run in Alpine container **without network access**
+- Commands run in Debian/Bun container
 - Stricter timeout (max 15s)
 - Output truncated to 4096 characters
 - Can create and list scheduled tasks, but **cannot remove** them
@@ -143,15 +144,26 @@ RustClaw distinguishes between the **bot owner** and **regular users**. The AI m
 The bot has access to these tools:
 
 ### `run_command`
-Execute shell commands in an isolated Alpine Linux Docker container:
+Execute shell commands in an isolated Debian Docker container with Bun runtime:
 ```
-@YourBot run python3 --version
+@YourBot run bun --version
 ```
 
-- All users' commands run inside `alpine:latest` containers
-- Use `apk add` to install packages within the container
+- All users' commands run inside `oven/bun:debian` containers
+- Bun and Node.js are pre-installed
+- Use `apt-get install` to install additional packages within the container
 - Owner: network enabled, configurable timeout
 - Others: network disabled, 15s timeout, output capped at 4096 chars
+
+### `reset_container`
+Reset the Docker sandbox container (owner only):
+```
+@YourBot reset the container
+```
+
+- Stops and removes the current container
+- Clears the workspace directory
+- A fresh container is created on the next command
 
 ### `web_search`
 Search the web using Brave API:
@@ -296,7 +308,7 @@ ls -la data/
 ### Commands failing
 
 1. Ensure Docker is running: `docker info`
-2. Check the Alpine image is accessible: `docker run --rm alpine echo ok`
+2. Check the Bun image is accessible: `docker run --rm oven/bun:debian bun --version`
 3. Review logs for container creation errors
 
 ## Contributing

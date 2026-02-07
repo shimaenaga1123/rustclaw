@@ -132,6 +132,13 @@ impl RigAgent {
                     .tool(send_file)
                     .tool(weather);
 
+                if is_owner {
+                    let reset_container = super::tools::ResetContainer {
+                        config: self.config.clone(),
+                    };
+                    agent_builder = agent_builder.tool(reset_container);
+                }
+
                 if self.config.brave_api_key.is_some() {
                     let web_search = super::tools::WebSearch {
                         config: self.config.clone(),
