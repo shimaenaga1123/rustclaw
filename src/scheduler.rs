@@ -106,9 +106,25 @@ impl Scheduler {
             let discord_http = discord_http.clone();
             Box::pin(async move {
                 info!("Running scheduled task: {}", task_id);
-                match agent
-                    .process(&prompt, is_owner, discord_channel_id, None, &[])
+                let (tx, mut rx) = tokio::sync::mpsc::channel(128);
+                let agent_clone = agent.clone();
+                let prompt_clone = prompt.clone();
+                let handle = tokio::spawn(async move {
+                    agent_clone
+                        .process_streaming(
+                            &prompt_clone,
+                            is_owner,
+                            discord_channel_id,
+                            None,
+                            &[],
+                            tx,
+                        )
+                        .await
+                });
+                while rx.recv().await.is_some() {}
+                match handle
                     .await
+                    .unwrap_or_else(|e| Err(anyhow::anyhow!("{}", e)))
                 {
                     Ok(response) => {
                         if let Some(channel_id) = discord_channel_id

@@ -1,11 +1,12 @@
 use crate::{
-    agent::{AttachmentInfo, RigAgent, UserInfo},
+    agent::{AttachmentInfo, RigAgent, StreamEvent, UserInfo},
     config::Config,
     memory::MemoryManager,
     scheduler::Scheduler,
     utils,
 };
 use anyhow::Result;
+use serenity::builder::EditMessage;
 use serenity::{
     all::CreateAttachment,
     async_trait,
@@ -15,6 +16,8 @@ use serenity::{
 };
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::mpsc;
 use tracing::{error, info, warn};
 
 const DISCORD_MAX_LEN: usize = 2000;
@@ -231,29 +234,124 @@ impl EventHandler for Handler {
             content
         };
 
-        match self
-            .agent
-            .process(
-                &input,
-                is_owner,
-                Some(msg.channel_id.get()),
-                Some(&user_info),
-                &attachments,
-            )
-            .await
-        {
-            Ok(response) => {
-                typing.stop();
+        let (tx, mut rx) = mpsc::channel::<StreamEvent>(128);
 
-                let chunks = utils::split_message(&response.text, DISCORD_MAX_LEN);
-                for (i, chunk) in chunks.iter().enumerate() {
-                    let result = if i == 0 {
-                        msg.reply(&ctx, chunk).await
-                    } else {
-                        msg.channel_id.say(&ctx.http, chunk).await
-                    };
-                    if let Err(e) = result {
-                        error!("Failed to send message chunk {}: {}", i, e);
+        let agent = self.agent.clone();
+        let channel_id_val = msg.channel_id.get();
+        let attachments_owned = attachments;
+
+        let handle = tokio::spawn(async move {
+            agent
+                .process_streaming(
+                    &input,
+                    is_owner,
+                    Some(channel_id_val),
+                    Some(&user_info),
+                    &attachments_owned,
+                    tx,
+                )
+                .await
+        });
+
+        typing.stop();
+
+        let mut reply_msg = match msg.reply(&ctx, "…").await {
+            Ok(m) => m,
+            Err(e) => {
+                error!("Failed to send initial reply: {}", e);
+                return;
+            }
+        };
+
+        let mut accumulated = String::new();
+        let mut last_edit = Instant::now();
+        let edit_interval = Duration::from_millis(800);
+        let mut extra_messages: Vec<Message> = Vec::new();
+
+        loop {
+            match tokio::time::timeout(Duration::from_millis(200), rx.recv()).await {
+                Ok(Some(StreamEvent::TextDelta(text))) => {
+                    accumulated.push_str(&text);
+
+                    if accumulated.len() > 1900 {
+                        let split_at = accumulated[..1900]
+                            .rfind('\n')
+                            .or_else(|| accumulated[..1900].rfind(' '))
+                            .unwrap_or(1900);
+
+                        let current_chunk: String = accumulated[..split_at].to_string();
+                        accumulated = accumulated[split_at..].to_string();
+
+                        if extra_messages.is_empty() {
+                            let _ = reply_msg
+                                .edit(&ctx, EditMessage::new().content(&current_chunk))
+                                .await;
+                        } else {
+                            let last = extra_messages.last_mut().unwrap();
+                            let _ = last
+                                .edit(&ctx, EditMessage::new().content(&current_chunk))
+                                .await;
+                        }
+
+                        match msg.channel_id.say(&ctx.http, "…").await {
+                            Ok(m) => extra_messages.push(m),
+                            Err(e) => error!("Failed to send continuation message: {}", e),
+                        }
+                    }
+
+                    if last_edit.elapsed() >= edit_interval && !accumulated.is_empty() {
+                        let target = if let Some(last) = extra_messages.last_mut() {
+                            last
+                        } else {
+                            &mut reply_msg
+                        };
+                        let _ = target
+                            .edit(&ctx, EditMessage::new().content(&accumulated))
+                            .await;
+                        last_edit = Instant::now();
+                    }
+                }
+                Ok(Some(StreamEvent::Done)) | Ok(None) => break,
+                Ok(Some(StreamEvent::Error(e))) => {
+                    error!("Stream error: {}", e);
+                    break;
+                }
+                Err(_) => {
+                    if last_edit.elapsed() >= edit_interval && !accumulated.is_empty() {
+                        let target = if let Some(last) = extra_messages.last_mut() {
+                            last
+                        } else {
+                            &mut reply_msg
+                        };
+                        let _ = target
+                            .edit(&ctx, EditMessage::new().content(&accumulated))
+                            .await;
+                        last_edit = Instant::now();
+                    }
+                }
+            }
+        }
+
+        if !accumulated.is_empty() {
+            let target = if let Some(last) = extra_messages.last_mut() {
+                last
+            } else {
+                &mut reply_msg
+            };
+            let _ = target
+                .edit(&ctx, EditMessage::new().content(&accumulated))
+                .await;
+        }
+
+        match handle.await {
+            Ok(Ok(response)) => {
+                if accumulated.is_empty() && !response.text.is_empty() {
+                    let chunks = utils::split_message(&response.text, DISCORD_MAX_LEN);
+                    let _ = reply_msg
+                        .edit(&ctx, EditMessage::new().content(&chunks[0]))
+                        .await;
+                    for chunk in &chunks[1..] {
+                        let _ = msg.channel_id.say(&ctx.http, chunk).await;
                     }
                 }
 
@@ -277,11 +375,22 @@ impl EventHandler for Handler {
                     }
                 }
             }
-            Err(e) => {
-                typing.stop();
+            Ok(Err(e)) => {
                 error!("Agent error: {}", e);
-                let _ = msg
-                    .reply(&ctx, "An error occurred during processing.")
+                let _ = reply_msg
+                    .edit(
+                        &ctx,
+                        EditMessage::new().content("처리 중 오류가 발생했습니다."),
+                    )
+                    .await;
+            }
+            Err(e) => {
+                error!("Task join error: {}", e);
+                let _ = reply_msg
+                    .edit(
+                        &ctx,
+                        EditMessage::new().content("처리 중 오류가 발생했습니다."),
+                    )
                     .await;
             }
         }
