@@ -13,8 +13,5 @@ RestartSec=5
 StandardOutput=journal
 StandardError=journal
 
-# Environment file
-EnvironmentFile=%INSTALL_DIR%/.env
-
 [Install]
 WantedBy=default.target

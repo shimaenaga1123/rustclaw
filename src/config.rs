@@ -1,5 +1,56 @@
 use anyhow::{Context, Result};
+use serde::Deserialize;
 use std::path::PathBuf;
+
+#[derive(Debug, Clone, Deserialize)]
+struct ConfigFile {
+    discord: DiscordConfig,
+    api: ApiConfig,
+    brave: BraveConfig,
+    storage: StorageConfig,
+    context: ContextConfig,
+    commands: CommandsConfig,
+    model: ModelConfig,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct DiscordConfig {
+    token: String,
+    owner_id: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ApiConfig {
+    key: String,
+    url: String,
+    model: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct BraveConfig {
+    api_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct StorageConfig {
+    data_dir: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ContextConfig {
+    limit: usize,
+    threshold: f32,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CommandsConfig {
+    timeout: u64,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ModelConfig {
+    disable_reasoning: bool,
+}
 
 #[derive(Debug, Clone)]
 pub struct Config {
@@ -17,35 +68,29 @@ pub struct Config {
 }
 
 impl Config {
-    pub fn from_env() -> Result<Self> {
+    pub fn from_file(path: &str) -> Result<Self> {
+        let content = std::fs::read_to_string(path)
+            .with_context(|| format!("Failed to read config file: {}", path))?;
+
+        let config_file: ConfigFile =
+            toml::from_str(&content).context("Failed to parse config file")?;
+
         Ok(Self {
-            discord_token: std::env::var("DISCORD_TOKEN").context("DISCORD_TOKEN not set")?,
-            owner_id: std::env::var("OWNER_ID")
-                .context("OWNER_ID not set")?
-                .parse()
-                .context("OWNER_ID must be a valid Discord user ID")?,
-            api_key: std::env::var("API_KEY").context("API_KEY not set")?,
-            api_url: std::env::var("API_URL")
-                .unwrap_or_else(|_| "https://api.anthropic.com/v1".to_string()),
-            model: std::env::var("MODEL")
-                .unwrap_or_else(|_| "claude-3-5-sonnet-20241022".to_string()),
-            brave_api_key: std::env::var("BRAVE_API_KEY").ok(),
-            data_dir: std::env::var("DATA_DIR")
-                .unwrap_or_else(|_| "data".to_string())
-                .into(),
-            context_limit: std::env::var("CONTEXT_LIMIT")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(128000),
-            context_threshold: 0.8,
-            command_timeout: std::env::var("COMMAND_TIMEOUT")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(30),
-            disable_reasoning: std::env::var("DISABLE_REASONING")
-                .ok()
-                .and_then(|s| s.parse().ok())
-                .unwrap_or(false),
+            discord_token: config_file.discord.token,
+            owner_id: config_file.discord.owner_id,
+            api_key: config_file.api.key,
+            api_url: config_file.api.url,
+            model: config_file.api.model,
+            brave_api_key: config_file.brave.api_key,
+            data_dir: config_file.storage.data_dir.into(),
+            context_limit: config_file.context.limit,
+            context_threshold: config_file.context.threshold,
+            command_timeout: config_file.commands.timeout,
+            disable_reasoning: config_file.model.disable_reasoning,
         })
+    }
+
+    pub fn load() -> Result<Self> {
+        Self::from_file("config.toml")
     }
 }

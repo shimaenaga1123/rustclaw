@@ -28,28 +28,19 @@ A lightweight, memory-aware Discord AI assistant powered by Anthropic-compatible
 ```bash
 git clone https://github.com/yourusername/rustclaw
 cd rustclaw
-cp .env.example .env
+cp config.example.toml config.toml
 ```
 
-### 2. Configure Environment
+### 2. Configure
 
-Edit `.env` with your credentials:
-
-```env
-DISCORD_TOKEN=your_token
-OWNER_ID=your_discord_user_id  # Right-click profile -> Copy User ID
-API_KEY=your_api_key
-API_URL=https://api.anthropic.com/v1  # or any Anthropic-compatible endpoint
-MODEL=claude-3-5-sonnet-20241022  # or your preferred model
-BRAVE_API_KEY=your_key  # optional
-```
+Edit `config.toml` with your credentials. See `config.example.toml` for all options.
 
 ### 3. Create Discord Bot
 
 1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
 2. Create New Application → Bot
 3. Enable "Message Content Intent"
-4. Copy token to `.env`
+4. Copy token to `config.toml`
 5. Invite bot with permissions: `View Channels`, `Send Messages`, `Read Message History`
 
 ### 4. Prepare Docker
@@ -235,14 +226,6 @@ rustclaw/
 │   │   ├── mod.rs
 │   │   ├── rig_agent.rs  # AI agent + Rig integration + permission-aware preamble
 │   │   └── tools/        # Tool implementations
-│   │       ├── mod.rs
-│   │       ├── error.rs
-│   │       ├── run_command.rs    # Alpine Docker execution
-│   │       ├── remember.rs
-│   │       ├── web_search.rs
-│   │       ├── schedule.rs
-│   │       ├── unschedule.rs     # Owner-only deletion
-│   │       └── list_schedules.rs
 │   ├── discord/
 │   │   ├── mod.rs
 │   │   └── bot.rs        # Discord event handler
@@ -261,21 +244,7 @@ rustclaw/
 
 ## Configuration
 
-### Environment Variables
-
-| Variable | Required | Default | Description |
-|----------|----------|---------|-------------|
-| `DISCORD_TOKEN` | ✅ | - | Discord bot token |
-| `OWNER_ID` | ✅ | - | Discord user ID of the bot owner |
-| `API_KEY` | ✅ | - | Anthropic-compatible API key |
-| `API_URL` | ❌ | `https://api.anthropic.com/v1` | API endpoint (Claude, Minimax, etc.) |
-| `MODEL` | ❌ | `claude-3-5-sonnet-20241022` | Model name |
-| `BRAVE_API_KEY` | ❌ | - | Brave Search API key |
-| `DATA_DIR` | ❌ | `data` | Data directory path |
-| `CONTEXT_LIMIT` | ❌ | `128000` | Token limit |
-| `COMMAND_TIMEOUT` | ❌ | `30` | Command timeout in seconds (non-owner capped at 15s) |
-| `DISABLE_REASONING` | ❌ | `false` | Disable extended thinking/reasoning for faster, cheaper responses |
-| `RUST_LOG` | ❌ | `info` | Log level |
+See `config.example.toml` for all available options.
 
 ## Development
 

@@ -9,8 +9,6 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    dotenvy::dotenv().ok();
-
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
             std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()),
@@ -18,7 +16,7 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::fmt::layer())
         .init();
 
-    let config = config::Config::from_env()?;
+    let config = config::Config::load()?;
 
     let memory_manager = memory::MemoryManager::new(&config.data_dir).await?;
     let agent = agent::RigAgent::new(config.clone(), memory_manager.clone()).await?;

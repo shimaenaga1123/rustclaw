@@ -26,11 +26,11 @@ mkdir -p "$HOME/.config/systemd/user"
 cp target/release/rustclaw "$INSTALL_DIR/"
 chmod 755 "$INSTALL_DIR/rustclaw"
 
-if [ -f .env ] && [ "$UPDATE" = false ]; then
-    cp .env "$INSTALL_DIR/"
-    chmod 600 "$INSTALL_DIR/.env"
-elif [ ! -f "$INSTALL_DIR/.env" ]; then
-    echo "Warning: .env not found. Please create $INSTALL_DIR/.env manually."
+if [ -f config.toml ] && [ "$UPDATE" = false ]; then
+    cp config.toml "$INSTALL_DIR/"
+    chmod 600 "$INSTALL_DIR/config.toml"
+elif [ ! -f "$INSTALL_DIR/config.toml" ]; then
+    echo "Warning: config.toml not found. Please create $INSTALL_DIR/config.toml manually."
 fi
 
 sed "s|%INSTALL_DIR%|$INSTALL_DIR|g" rustclaw.service > "$HOME/.config/systemd/user/$SERVICE_NAME.service"
@@ -59,5 +59,5 @@ echo ""
 echo "Enable linger for auto-start on boot:"
 echo "  sudo loginctl enable-linger \$USER"
 echo ""
-echo "Config: $INSTALL_DIR/.env"
+echo "Config: $INSTALL_DIR/config.toml"
 echo "Data:   $INSTALL_DIR/data/"

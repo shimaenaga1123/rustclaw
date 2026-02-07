@@ -1,0 +1,33 @@
+# RustClaw Configuration
+# Copy this file to config.toml and fill in your values
+
+[discord]
+# Get from: https://discord.com/developers/applications
+token = "your_discord_bot_token_here"
+# Bot Owner (Discord User ID) - Right-click your profile in Discord -> Copy User ID
+owner_id = 123456789012345678
+
+[api]
+# Anthropic-compatible API - works with Claude, Minimax, etc.
+key = "your_api_key_here"
+url = "https://api.anthropic.com/v1"
+model = "claude-3-5-sonnet-20241022"
+
+[brave]
+# Brave Search API (optional) - Get from: https://brave.com/search/api/
+# api_key = "your_brave_api_key_here"
+
+[storage]
+data_dir = "data"
+
+[context]
+limit = 128000
+threshold = 0.8
+
+[commands]
+# Command timeout in seconds (non-owner capped at 15s)
+timeout = 30
+
+[model]
+# Set to true to disable extended thinking/reasoning
+disable_reasoning = false
