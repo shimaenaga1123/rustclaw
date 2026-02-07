@@ -3,7 +3,7 @@ use anyhow::Result;
 use rig::{
     client::CompletionClient,
     completion::Prompt,
-    providers::{anthropic, openai},
+    providers::{anthropic, openai, gemini},
 };
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -170,6 +170,10 @@ impl RigAgent {
                     .build()?;
                 build_and_run_agent!(client)
             }
+            "gemini" => {
+                let client = gemini::Client::new(&self.config.api_key)?;
+                build_and_run_agent!(client)
+            }
             _ => {
                 let client: anthropic::Client = anthropic::Client::builder()
                     .api_key(&self.config.api_key)
@@ -221,6 +225,10 @@ impl RigAgent {
                     .api_key(&self.config.api_key)
                     .base_url(&self.config.api_url)
                     .build()?;
+                build_and_summarize!(client)
+            }
+            "gemini" => {
+                let client = gemini::Client::new(&self.config.api_key)?;
                 build_and_summarize!(client)
             }
             _ => {
