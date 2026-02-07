@@ -2,13 +2,12 @@ use super::error::ToolError;
 use crate::config::Config;
 use bollard::{
     Docker,
-    container::{
-        Config as ContainerConfig, CreateContainerOptions, RemoveContainerOptions,
-        StartContainerOptions, StopContainerOptions,
-    },
     exec::{CreateExecOptions, StartExecResults},
-    image::CreateImageOptions,
-    models::HostConfig,
+    models::{ContainerCreateBody, HostConfig},
+    query_parameters::{
+        CreateContainerOptionsBuilder, CreateImageOptionsBuilder, RemoveContainerOptionsBuilder,
+        StopContainerOptionsBuilder,
+    },
 };
 use futures_util::StreamExt;
 use rig::{completion::ToolDefinition, tool::Tool};
@@ -46,10 +45,9 @@ impl RunCommand {
         }
 
         info!("Pulling sandbox image: {}", SANDBOX_IMAGE);
-        let options = CreateImageOptions {
-            from_image: SANDBOX_IMAGE,
-            ..Default::default()
-        };
+        let options = CreateImageOptionsBuilder::new()
+            .from_image(SANDBOX_IMAGE)
+            .build();
 
         let mut stream = docker.create_image(Some(options), None, None);
         while let Some(result) = stream.next().await {
@@ -69,7 +67,7 @@ impl RunCommand {
                 if !running {
                     info!("Sandbox container exists but not running, starting...");
                     docker
-                        .start_container(CONTAINER_NAME, None::<StartContainerOptions<String>>)
+                        .start_container(CONTAINER_NAME, None)
                         .await
                         .map_err(|e| {
                             ToolError::CommandFailed(format!("Container start failed: {}", e))
@@ -99,20 +97,19 @@ impl RunCommand {
                     ..Default::default()
                 };
 
-                let container_config = ContainerConfig {
-                    image: Some(SANDBOX_IMAGE),
-                    cmd: Some(vec!["sleep", "infinity"]),
-                    working_dir: Some("/workspace"),
+                let container_config = ContainerCreateBody {
+                    image: Some(SANDBOX_IMAGE.to_string()),
+                    cmd: Some(vec!["sleep".to_string(), "infinity".to_string()]),
+                    working_dir: Some("/workspace".to_string()),
                     network_disabled: Some(false),
                     host_config: Some(host_config),
                     tty: Some(true),
                     ..Default::default()
                 };
 
-                let options = CreateContainerOptions {
-                    name: CONTAINER_NAME,
-                    platform: None,
-                };
+                let options = CreateContainerOptionsBuilder::new()
+                    .name(CONTAINER_NAME)
+                    .build();
 
                 docker
                     .create_container(Some(options), container_config)
@@ -122,7 +119,7 @@ impl RunCommand {
                     })?;
 
                 docker
-                    .start_container(CONTAINER_NAME, None::<StartContainerOptions<String>>)
+                    .start_container(CONTAINER_NAME, None)
                     .await
                     .map_err(|e| {
                         ToolError::CommandFailed(format!("Container start failed: {}", e))
@@ -141,17 +138,17 @@ impl RunCommand {
         let _lock = CONTAINER_LOCK.lock().await;
 
         docker
-            .stop_container(CONTAINER_NAME, Some(StopContainerOptions { t: 2 }))
+            .stop_container(
+                CONTAINER_NAME,
+                Some(StopContainerOptionsBuilder::new().t(2).build()),
+            )
             .await
             .ok();
 
         docker
             .remove_container(
                 CONTAINER_NAME,
-                Some(RemoveContainerOptions {
-                    force: true,
-                    ..Default::default()
-                }),
+                Some(RemoveContainerOptionsBuilder::new().force(true).build()),
             )
             .await
             .ok();
