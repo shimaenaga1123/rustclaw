@@ -1,6 +1,10 @@
 use crate::{config::Config, memory::MemoryManager, scheduler::Scheduler};
 use anyhow::Result;
-use rig::{client::CompletionClient, completion::Prompt, providers::anthropic::Client};
+use rig::{
+    client::CompletionClient,
+    completion::Prompt,
+    providers::{anthropic, openai},
+};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -86,81 +90,94 @@ impl RigAgent {
             format!("{}\n\nUser: {}", context, user_input)
         };
 
-        let client: Client = Client::builder()
-            .api_key(&self.config.api_key)
-            .base_url(&self.config.api_url)
-            .build()?;
-
         let preamble = self.build_preamble(is_owner);
         let pending_files = Arc::new(RwLock::new(Vec::new()));
+        let scheduler_ref = self.scheduler.read().await.clone();
 
-        let run_command = super::tools::RunCommand {
-            config: self.config.clone(),
-            is_owner,
-        };
+        macro_rules! build_and_run_agent {
+            ($client:expr) => {{
+                let run_command = super::tools::RunCommand {
+                    config: self.config.clone(),
+                    is_owner,
+                };
+                let remember = super::tools::Remember {
+                    memory: self.memory.clone(),
+                };
+                let send_file = super::tools::SendFile {
+                    pending_files: pending_files.clone(),
+                    config: self.config.clone(),
+                };
+                let weather = super::tools::Weather {
+                    client: reqwest::Client::new(),
+                };
 
-        let remember = super::tools::Remember {
-            memory: self.memory.clone(),
-        };
+                let base_builder = $client
+                    .agent(&self.config.model)
+                    .preamble(&preamble)
+                    .max_tokens(4096);
 
-        let send_file = super::tools::SendFile {
-            pending_files: pending_files.clone(),
-            config: self.config.clone(),
-        };
+                let base_builder = if self.config.disable_reasoning {
+                    base_builder.additional_params(serde_json::json!({
+                        "thinking": {
+                            "type": "disabled"
+                        }
+                    }))
+                } else {
+                    base_builder
+                };
 
-        let weather = super::tools::Weather {
-            client: reqwest::Client::new(),
-        };
+                let mut agent_builder = base_builder
+                    .tool(run_command)
+                    .tool(remember)
+                    .tool(send_file)
+                    .tool(weather);
 
-        let base_builder = client
-            .agent(&self.config.model)
-            .preamble(&preamble)
-            .max_tokens(4096);
-
-        let base_builder = if self.config.disable_reasoning {
-            base_builder.additional_params(serde_json::json!({
-                "thinking": {
-                    "type": "disabled"
+                if self.config.brave_api_key.is_some() {
+                    let web_search = super::tools::WebSearch {
+                        config: self.config.clone(),
+                        client: reqwest::Client::new(),
+                    };
+                    agent_builder = agent_builder.tool(web_search);
                 }
-            }))
-        } else {
-            base_builder
+
+                if let Some(scheduler) = scheduler_ref.clone() {
+                    let schedule = super::tools::Schedule {
+                        scheduler: scheduler.clone(),
+                        is_owner,
+                        discord_channel_id,
+                    };
+                    let unschedule = super::tools::Unschedule {
+                        scheduler: scheduler.clone(),
+                        is_owner,
+                    };
+                    let list_schedules = super::tools::ListSchedules { scheduler };
+                    agent_builder = agent_builder
+                        .tool(schedule)
+                        .tool(unschedule)
+                        .tool(list_schedules);
+                }
+
+                let agent = agent_builder.default_max_turns(50).build();
+                agent.prompt(&full_prompt).await?
+            }};
+        }
+
+        let response: String = match self.config.api_provider.as_str() {
+            "openai" | "openai-compatible" => {
+                let client: openai::Client = openai::Client::builder()
+                    .api_key(&self.config.api_key)
+                    .base_url(&self.config.api_url)
+                    .build()?;
+                build_and_run_agent!(client)
+            }
+            _ => {
+                let client: anthropic::Client = anthropic::Client::builder()
+                    .api_key(&self.config.api_key)
+                    .base_url(&self.config.api_url)
+                    .build()?;
+                build_and_run_agent!(client)
+            }
         };
-
-        let mut agent_builder = base_builder
-            .tool(run_command)
-            .tool(remember)
-            .tool(send_file)
-            .tool(weather);
-
-        if self.config.brave_api_key.is_some() {
-            let web_search = super::tools::WebSearch {
-                config: self.config.clone(),
-                client: reqwest::Client::new(),
-            };
-            agent_builder = agent_builder.tool(web_search);
-        }
-
-        if let Some(scheduler) = self.scheduler.read().await.clone() {
-            let schedule = super::tools::Schedule {
-                scheduler: scheduler.clone(),
-                is_owner,
-                discord_channel_id,
-            };
-            let unschedule = super::tools::Unschedule {
-                scheduler: scheduler.clone(),
-                is_owner,
-            };
-            let list_schedules = super::tools::ListSchedules { scheduler };
-            agent_builder = agent_builder
-                .tool(schedule)
-                .tool(unschedule)
-                .tool(list_schedules);
-        }
-
-        let agent = agent_builder.default_max_turns(50).build();
-
-        let response = agent.prompt(full_prompt).await?;
 
         self.memory.add_assistant_message(&response).await?;
 
@@ -173,34 +190,49 @@ impl RigAgent {
     }
 
     async fn summarize_context(&self, context: &str) -> Result<String> {
-        let client: Client = Client::builder()
-            .api_key(&self.config.api_key)
-            .base_url(&self.config.api_url)
-            .build()?;
+        let preamble = "Summarize only the key points of the conversation. \
+                        Be concise but preserve important facts, user preferences, and decisions made.";
 
-        let agent_builder = client
-            .agent(&self.config.model)
-            .preamble(
-                "Summarize only the key points of the conversation. \
-                 Be concise but preserve important facts, user preferences, and decisions made.",
-            )
-            .max_tokens(4096);
+        macro_rules! build_and_summarize {
+            ($client:expr) => {{
+                let agent_builder = $client
+                    .agent(&self.config.model)
+                    .preamble(preamble)
+                    .max_tokens(4096);
 
-        let agent_builder = if self.config.disable_reasoning {
-            agent_builder.additional_params(serde_json::json!({
-                "thinking": {
-                    "type": "disabled"
-                }
-            }))
-        } else {
-            agent_builder
+                let agent_builder = if self.config.disable_reasoning {
+                    agent_builder.additional_params(serde_json::json!({
+                        "thinking": {
+                            "type": "disabled"
+                        }
+                    }))
+                } else {
+                    agent_builder
+                };
+
+                let agent = agent_builder.build();
+                agent.prompt(context).await?
+            }};
+        }
+
+        let summary: String = match self.config.api_provider.as_str() {
+            "openai" | "openai-compatible" => {
+                let client: openai::Client = openai::Client::builder()
+                    .api_key(&self.config.api_key)
+                    .base_url(&self.config.api_url)
+                    .build()?;
+                build_and_summarize!(client)
+            }
+            _ => {
+                let client: anthropic::Client = anthropic::Client::builder()
+                    .api_key(&self.config.api_key)
+                    .base_url(&self.config.api_url)
+                    .build()?;
+                build_and_summarize!(client)
+            }
         };
 
-        let agent = agent_builder.build();
-
-        let summary = agent.prompt(context).await?;
-
-        Ok(summary.to_string())
+        Ok(summary)
     }
 
     fn estimate_tokens(&self, context: &str, input: &str) -> usize {

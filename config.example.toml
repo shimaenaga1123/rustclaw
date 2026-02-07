@@ -8,10 +8,25 @@ token = "your_discord_bot_token_here"
 owner_id = 123456789012345678
 
 [api]
-# Anthropic-compatible API - works with Claude, Minimax, etc.
+# API provider: "anthropic", "openai", "openai-compatible"
+provider = "anthropic"
 key = "your_api_key_here"
+# URL can be customized for compatible APIs (e.g., Azure, local LLMs)
 url = "https://api.anthropic.com/v1"
-model = "claude-3-5-sonnet-20241022"
+model = "claude-sonnet-4-20250514"
+
+# Examples for other providers:
+# [api]
+# provider = "openai"
+# key = "sk-..."
+# url = "https://api.openai.com/v1"
+# model = "gpt-4o"
+#
+# [api]
+# provider = "openai-compatible"
+# key = "your_key"
+# url = "http://localhost:11434/v1"  # e.g., Ollama
+# model = "llama3"
 
 [brave]
 # Brave Search API (optional) - Get from: https://brave.com/search/api/

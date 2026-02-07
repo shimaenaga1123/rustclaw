@@ -21,6 +21,7 @@ struct DiscordConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 struct ApiConfig {
+    provider: String,
     key: String,
     url: String,
     model: String,
@@ -56,6 +57,7 @@ struct ModelConfig {
 pub struct Config {
     pub discord_token: String,
     pub owner_id: u64,
+    pub api_provider: String,
     pub api_key: String,
     pub api_url: String,
     pub model: String,
@@ -78,6 +80,7 @@ impl Config {
         Ok(Self {
             discord_token: config_file.discord.token,
             owner_id: config_file.discord.owner_id,
+            api_provider: config_file.api.provider,
             api_key: config_file.api.key,
             api_url: config_file.api.url,
             model: config_file.api.model,
