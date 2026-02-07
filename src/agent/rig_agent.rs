@@ -164,7 +164,7 @@ impl RigAgent {
 
         let response: String = match self.config.api_provider.as_str() {
             "openai" | "openai-compatible" => {
-                let client: openai::Client = openai::Client::builder()
+                let client: openai::CompletionsClient = openai::CompletionsClient::builder()
                     .api_key(&self.config.api_key)
                     .base_url(&self.config.api_url)
                     .build()?;
@@ -217,7 +217,7 @@ impl RigAgent {
 
         let summary: String = match self.config.api_provider.as_str() {
             "openai" | "openai-compatible" => {
-                let client: openai::Client = openai::Client::builder()
+                let client: openai::CompletionsClient = openai::CompletionsClient::builder()
                     .api_key(&self.config.api_key)
                     .base_url(&self.config.api_url)
                     .build()?;
