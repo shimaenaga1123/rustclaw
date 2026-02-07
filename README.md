@@ -274,6 +274,7 @@ rustclaw/
 | `DATA_DIR` | ❌ | `data` | Data directory path |
 | `CONTEXT_LIMIT` | ❌ | `128000` | Token limit |
 | `COMMAND_TIMEOUT` | ❌ | `30` | Command timeout in seconds (non-owner capped at 15s) |
+| `DISABLE_REASONING` | ❌ | `false` | Disable extended thinking/reasoning for faster, cheaper responses |
 | `RUST_LOG` | ❌ | `info` | Log level |
 
 ## Development

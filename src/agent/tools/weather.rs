@@ -164,10 +164,7 @@ impl Tool for Weather {
         let location_str = format!(
             "{}, {}",
             location.name,
-            location
-                .admin1
-                .or(location.country)
-                .unwrap_or_default()
+            location.admin1.or(location.country).unwrap_or_default()
         );
 
         let mut output = format!("Weather for {}\n", location_str);

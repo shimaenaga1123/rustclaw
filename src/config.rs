@@ -13,6 +13,7 @@ pub struct Config {
     pub context_limit: usize,
     pub context_threshold: f32,
     pub command_timeout: u64,
+    pub disable_reasoning: bool,
 }
 
 impl Config {
@@ -41,6 +42,10 @@ impl Config {
                 .ok()
                 .and_then(|s| s.parse().ok())
                 .unwrap_or(30),
+            disable_reasoning: std::env::var("DISABLE_REASONING")
+                .ok()
+                .and_then(|s| s.parse().ok())
+                .unwrap_or(false),
         })
     }
 }

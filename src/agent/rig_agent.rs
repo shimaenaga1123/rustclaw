@@ -112,10 +112,22 @@ impl RigAgent {
             client: reqwest::Client::new(),
         };
 
-        let mut agent_builder = client
+        let base_builder = client
             .agent(&self.config.model)
             .preamble(&preamble)
-            .max_tokens(4096)
+            .max_tokens(4096);
+
+        let base_builder = if self.config.disable_reasoning {
+            base_builder.additional_params(serde_json::json!({
+                "thinking": {
+                    "type": "disabled"
+                }
+            }))
+        } else {
+            base_builder
+        };
+
+        let mut agent_builder = base_builder
             .tool(run_command)
             .tool(remember)
             .tool(send_file)
@@ -166,14 +178,25 @@ impl RigAgent {
             .base_url(&self.config.api_url)
             .build()?;
 
-        let agent = client
+        let agent_builder = client
             .agent(&self.config.model)
             .preamble(
                 "Summarize only the key points of the conversation. \
                  Be concise but preserve important facts, user preferences, and decisions made.",
             )
-            .max_tokens(4096)
-            .build();
+            .max_tokens(4096);
+
+        let agent_builder = if self.config.disable_reasoning {
+            agent_builder.additional_params(serde_json::json!({
+                "thinking": {
+                    "type": "disabled"
+                }
+            }))
+        } else {
+            agent_builder
+        };
+
+        let agent = agent_builder.build();
 
         let summary = agent.prompt(context).await?;
 
