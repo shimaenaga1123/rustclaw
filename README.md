@@ -105,16 +105,12 @@ RustClaw distinguishes between the **bot owner** and **regular users**. The AI m
 ### Owner
 
 - Full administrative privileges
-- Commands run in Debian/Bun container
-- Full command timeout (configurable, default 30s)
 - Can create, list, and **remove** scheduled tasks
 - Can **reset** the Docker container
 - No output truncation
 
 ### Regular Users
 
-- Commands run in Debian/Bun container
-- Stricter timeout (max 15s)
 - Output truncated to 4096 characters
 - Can create and list scheduled tasks, but **cannot remove** them
 - AI refuses requests that could affect the host system, reveal internal configuration, or escalate privileges

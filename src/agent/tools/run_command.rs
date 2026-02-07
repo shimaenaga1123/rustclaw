@@ -189,15 +189,9 @@ impl RunCommand {
             .await
             .map_err(|e| ToolError::CommandFailed(format!("Exec creation failed: {}", e)))?;
 
-        let timeout_secs = if self.is_owner {
-            self.config.command_timeout
-        } else {
-            self.config.command_timeout.min(15)
-        };
-
         let exec_id = exec.id.clone();
 
-        match tokio::time::timeout(Duration::from_secs(timeout_secs), async {
+        match tokio::time::timeout(Duration::from_secs(self.config.command_timeout), async {
             let start_result = docker
                 .start_exec(&exec.id, None)
                 .await
@@ -252,7 +246,7 @@ impl RunCommand {
             }
             Ok(Err(e)) => Err(e),
             Err(_) => {
-                warn!("Command execution timed out after {}s", timeout_secs);
+                warn!("Command execution timed out after {}s", self.config.command_timeout);
                 Err(ToolError::Timeout)
             }
         }
