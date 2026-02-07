@@ -1,0 +1,335 @@
+use crate::{
+    agent::{AttachmentInfo, RigAgent, UserInfo},
+    config::Config,
+    memory::MemoryManager,
+    scheduler::Scheduler,
+    utils,
+};
+use anyhow::Result;
+use serenity::{
+    all::CreateAttachment,
+    async_trait,
+    builder::CreateMessage,
+    model::{channel::Message, gateway::Ready, id::UserId},
+    prelude::*,
+};
+use std::path::PathBuf;
+use std::sync::Arc;
+use tracing::{error, info, warn};
+
+const DISCORD_MAX_LEN: usize = 2000;
+const MAX_ATTACHMENT_SIZE: u32 = 25 * 1024 * 1024; // 25MB
+
+pub struct Bot {
+    config: Config,
+    agent: Arc<RigAgent>,
+    memory: Arc<MemoryManager>,
+    scheduler: Arc<Scheduler>,
+}
+
+struct Handler {
+    agent: Arc<RigAgent>,
+    memory: Arc<MemoryManager>,
+    config: Config,
+    bot_id: Arc<RwLock<Option<UserId>>>,
+    owner_id: UserId,
+    scheduler: Arc<Scheduler>,
+    http_client: reqwest::Client,
+}
+
+impl Handler {
+    async fn build_user_info(&self, ctx: &Context, msg: &Message) -> UserInfo {
+        let author = &msg.author;
+
+        let mut user_info = UserInfo {
+            name: author.name.clone(),
+            global_name: author.global_name.clone(),
+            id: author.id.get(),
+            avatar_url: author.avatar_url(),
+            ..Default::default()
+        };
+
+        if let Some(guild_id) = msg.guild_id
+            && let Some(ref member) = msg.member
+        {
+            user_info.nickname = member.nick.clone();
+
+            if let Some(guild) = ctx.cache.guild(guild_id) {
+                let role_names: Vec<String> = member
+                    .roles
+                    .iter()
+                    .filter_map(|role_id| guild.roles.get(role_id).map(|r| r.name.clone()))
+                    .collect();
+                user_info.roles = role_names;
+            }
+        }
+
+        user_info
+    }
+
+    async fn download_attachments(&self, msg: &Message) -> Vec<AttachmentInfo> {
+        if msg.attachments.is_empty() {
+            return Vec::new();
+        }
+
+        let upload_dir = self.upload_dir();
+        if let Err(e) = tokio::fs::create_dir_all(&upload_dir).await {
+            error!("Failed to create upload directory: {}", e);
+            return Vec::new();
+        }
+
+        let mut result = Vec::new();
+
+        for attachment in &msg.attachments {
+            if attachment.size > MAX_ATTACHMENT_SIZE {
+                warn!(
+                    "Skipping attachment '{}': too large ({} bytes)",
+                    attachment.filename, attachment.size
+                );
+                continue;
+            }
+
+            let safe_filename = sanitize_filename(&attachment.filename);
+            if safe_filename.is_empty() {
+                warn!("Skipping attachment with invalid filename");
+                continue;
+            }
+
+            let host_path = upload_dir.join(&safe_filename);
+            let final_filename = if host_path.exists() {
+                let ts = chrono::Utc::now().format("%Y%m%d%H%M%S");
+                let stem = safe_filename
+                    .rfind('.')
+                    .map(|i| &safe_filename[..i])
+                    .unwrap_or(&safe_filename);
+                let ext = safe_filename
+                    .rfind('.')
+                    .map(|i| &safe_filename[i..])
+                    .unwrap_or("");
+                format!("{}_{}{}", stem, ts, ext)
+            } else {
+                safe_filename
+            };
+
+            let host_path = upload_dir.join(&final_filename);
+
+            match self.http_client.get(&attachment.url).send().await {
+                Ok(response) if response.status().is_success() => match response.bytes().await {
+                    Ok(bytes) => {
+                        if let Err(e) = tokio::fs::write(&host_path, &bytes).await {
+                            error!("Failed to write attachment '{}': {}", final_filename, e);
+                            continue;
+                        }
+
+                        info!(
+                            "Downloaded attachment '{}' ({} bytes)",
+                            final_filename,
+                            bytes.len()
+                        );
+
+                        result.push(AttachmentInfo {
+                            filename: final_filename.clone(),
+                            container_path: format!("/workspace/upload/{}", final_filename),
+                            size: attachment.size,
+                            content_type: attachment.content_type.clone(),
+                        });
+                    }
+                    Err(e) => {
+                        error!(
+                            "Failed to read attachment bytes '{}': {}",
+                            final_filename, e
+                        );
+                    }
+                },
+                Ok(response) => {
+                    error!(
+                        "Failed to download attachment '{}': HTTP {}",
+                        final_filename,
+                        response.status()
+                    );
+                }
+                Err(e) => {
+                    error!("Failed to download attachment '{}': {}", final_filename, e);
+                }
+            }
+        }
+
+        result
+    }
+
+    fn upload_dir(&self) -> PathBuf {
+        self.config.data_dir.join("workspace").join("upload")
+    }
+}
+
+fn sanitize_filename(name: &str) -> String {
+    name.replace(['/', '\\', '\0', ':', '*', '?', '"', '<', '>', '|'], "_")
+        .trim()
+        .chars()
+        .take(200)
+        .collect()
+}
+
+#[async_trait]
+impl EventHandler for Handler {
+    async fn message(&self, ctx: Context, msg: Message) {
+        if msg.author.bot {
+            return;
+        }
+
+        let bot_id = self.bot_id.read().await;
+        let Some(bot_id) = *bot_id else {
+            return;
+        };
+
+        if !msg.mentions.iter().any(|u| u.id == bot_id) {
+            return;
+        }
+
+        let content = msg
+            .content
+            .replace(&format!("<@{}>", bot_id), "")
+            .trim()
+            .to_string();
+
+        if content.is_empty() && msg.attachments.is_empty() {
+            return;
+        }
+
+        if let Err(e) = msg.react(&ctx, '👀').await {
+            error!("Failed to add reaction: {}", e);
+        }
+
+        let typing = msg.channel_id.start_typing(&ctx.http);
+
+        let user_info = self.build_user_info(&ctx, &msg).await;
+
+        let attachments = self.download_attachments(&msg).await;
+
+        let memory_content = if attachments.is_empty() {
+            content.clone()
+        } else {
+            let att_names: Vec<&str> = attachments.iter().map(|a| a.filename.as_str()).collect();
+            format!("{} [attachments: {}]", content, att_names.join(", "))
+        };
+
+        if let Err(e) = self
+            .memory
+            .add_message(&msg.author.name, &memory_content)
+            .await
+        {
+            error!("Failed to add message to memory: {}", e);
+            typing.stop();
+            return;
+        }
+
+        let is_owner = msg.author.id == self.owner_id;
+
+        let input = if content.is_empty() {
+            "I've attached files. Please check them.".to_string()
+        } else {
+            content
+        };
+
+        match self
+            .agent
+            .process(
+                &input,
+                is_owner,
+                Some(msg.channel_id.get()),
+                Some(&user_info),
+                &attachments,
+            )
+            .await
+        {
+            Ok(response) => {
+                typing.stop();
+
+                let chunks = utils::split_message(&response.text, DISCORD_MAX_LEN);
+                for (i, chunk) in chunks.iter().enumerate() {
+                    let result = if i == 0 {
+                        msg.reply(&ctx, chunk).await
+                    } else {
+                        msg.channel_id.say(&ctx.http, chunk).await
+                    };
+                    if let Err(e) = result {
+                        error!("Failed to send message chunk {}: {}", i, e);
+                    }
+                }
+
+                for file in &response.files {
+                    match CreateAttachment::path(&file.path).await {
+                        Ok(attachment) => {
+                            let builder = CreateMessage::new().add_file(attachment);
+                            if let Err(e) = msg.channel_id.send_message(&ctx.http, builder).await {
+                                error!("Failed to send file '{}': {}", file.filename, e);
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to create attachment for '{}': {}", file.filename, e);
+                        }
+                    }
+
+                    if file.path.to_string_lossy().contains("/tmp/")
+                        && let Err(e) = tokio::fs::remove_file(&file.path).await
+                    {
+                        error!("Failed to clean up temp file: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                typing.stop();
+                error!("Agent error: {}", e);
+                let _ = msg
+                    .reply(&ctx, "An error occurred during processing.")
+                    .await;
+            }
+        }
+    }
+
+    async fn ready(&self, ctx: Context, ready: Ready) {
+        info!("Bot connected as {}", ready.user.name);
+        *self.bot_id.write().await = Some(ready.user.id);
+        self.scheduler.set_discord_http(ctx.http).await;
+    }
+}
+
+impl Bot {
+    pub async fn new(
+        config: Config,
+        agent: Arc<RigAgent>,
+        memory: Arc<MemoryManager>,
+        scheduler: Arc<Scheduler>,
+    ) -> Result<Self> {
+        Ok(Self {
+            config,
+            agent,
+            memory,
+            scheduler,
+        })
+    }
+
+    pub async fn start(self) -> Result<()> {
+        let intents = GatewayIntents::GUILD_MESSAGES
+            | GatewayIntents::DIRECT_MESSAGES
+            | GatewayIntents::MESSAGE_CONTENT;
+
+        let handler = Handler {
+            agent: self.agent,
+            memory: self.memory,
+            config: self.config.clone(),
+            bot_id: Arc::new(RwLock::new(None)),
+            owner_id: UserId::new(self.config.owner_id),
+            scheduler: self.scheduler,
+            http_client: reqwest::Client::new(),
+        };
+
+        let mut client = Client::builder(&self.config.discord_token, intents)
+            .event_handler(handler)
+            .await?;
+
+        client.start().await?;
+
+        Ok(())
+    }
+}

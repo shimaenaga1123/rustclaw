@@ -1,4 +1,5 @@
 use crate::agent::RigAgent;
+use crate::utils;
 use anyhow::Result;
 use chrono_tz::Tz;
 use iana_time_zone::get_timezone;
@@ -8,7 +9,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::fs;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::{error, info};
 use uuid::Uuid;
@@ -27,47 +28,9 @@ pub struct ScheduledTask {
     pub discord_channel_id: Option<u64>,
 }
 
-fn split_message(text: &str, max_len: usize) -> Vec<String> {
-    if text.len() <= max_len {
-        return vec![text.to_string()];
-    }
-
-    let mut chunks = Vec::new();
-    let mut remaining = text;
-
-    while !remaining.is_empty() {
-        if remaining.len() <= max_len {
-            chunks.push(remaining.to_string());
-            break;
-        }
-
-        let split_at = remaining[..max_len]
-            .rfind('\n')
-            .map(|i| i + 1)
-            .unwrap_or_else(|| {
-                remaining[..max_len]
-                    .rfind(' ')
-                    .map(|i| i + 1)
-                    .unwrap_or(max_len)
-            });
-
-        let chunk = &remaining[..split_at];
-        if !chunk.trim().is_empty() {
-            chunks.push(chunk.to_string());
-        }
-        remaining = &remaining[split_at..];
-    }
-
-    if chunks.is_empty() {
-        chunks.push(text.chars().take(max_len).collect());
-    }
-
-    chunks
-}
-
 pub struct Scheduler {
     agent: Arc<RigAgent>,
-    scheduler: JobScheduler,
+    scheduler: Mutex<JobScheduler>,
     tasks: Arc<RwLock<HashMap<String, ScheduledTask>>>,
     job_ids: Arc<RwLock<HashMap<String, uuid::Uuid>>>,
     data_path: PathBuf,
@@ -90,7 +53,7 @@ impl Scheduler {
 
         let instance = Arc::new(Self {
             agent,
-            scheduler,
+            scheduler: Mutex::new(scheduler),
             tasks: Arc::new(RwLock::new(HashMap::new())),
             job_ids: Arc::new(RwLock::new(HashMap::new())),
             data_path,
@@ -111,8 +74,15 @@ impl Scheduler {
         }
         drop(tasks);
 
-        self.scheduler.start().await?;
+        self.scheduler.lock().await.start().await?;
         info!("Scheduler started");
+        Ok(())
+    }
+
+    pub async fn shutdown(&self) -> Result<()> {
+        self.scheduler.lock().await.shutdown().await?;
+        self.save_tasks().await?;
+        info!("Scheduler shut down");
         Ok(())
     }
 
@@ -136,14 +106,17 @@ impl Scheduler {
             let discord_http = discord_http.clone();
             Box::pin(async move {
                 info!("Running scheduled task: {}", task_id);
-                match agent.process(&prompt, is_owner, discord_channel_id).await {
+                match agent
+                    .process(&prompt, is_owner, discord_channel_id, None, &[])
+                    .await
+                {
                     Ok(response) => {
                         if let Some(channel_id) = discord_channel_id
                             && let Some(http) = discord_http.read().await.as_ref()
                         {
                             let channel = ChannelId::new(channel_id);
 
-                            for chunk in split_message(&response.text, DISCORD_MAX_LEN) {
+                            for chunk in utils::split_message(&response.text, DISCORD_MAX_LEN) {
                                 if let Err(e) = channel.say(http, &chunk).await {
                                     error!(
                                         "Failed to send scheduled task result to Discord: {}",
@@ -180,7 +153,7 @@ impl Scheduler {
             })
         })?;
 
-        let job_id = self.scheduler.add(job).await?;
+        let job_id = self.scheduler.lock().await.add(job).await?;
         self.job_ids.write().await.insert(task.id.clone(), job_id);
 
         Ok(())
@@ -225,7 +198,7 @@ impl Scheduler {
 
         if let Some(_task) = tasks.remove(task_id) {
             if let Some(job_id) = job_ids.remove(task_id) {
-                self.scheduler.remove(&job_id).await?;
+                self.scheduler.lock().await.remove(&job_id).await?;
             }
             drop(tasks);
             drop(job_ids);

@@ -1,6 +1,6 @@
 use super::error::ToolError;
 use super::run_command::RunCommand;
-use crate::agent::rig_agent::PendingFile;
+use crate::agent::PendingFile;
 use crate::config::Config;
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
@@ -8,7 +8,7 @@ use serde_json::json;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-const MAX_FILE_SIZE: u64 = 25 * 1024 * 1024; // 25MB Discord Nitro limit (8MB for free)
+const MAX_FILE_SIZE: u64 = 8 * 1024 * 1024; // 8MB
 
 #[derive(Deserialize, Serialize)]
 pub struct SendFileArgs {

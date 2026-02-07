@@ -126,7 +126,7 @@ RustClaw distinguishes between the **bot owner** and **regular users**. The AI m
 ### Long-Term Memory
 - Extracted via AI summarization on context compression
 - Manually added via `remember` tool
-- Deduplication: identical or substantially similar entries are skipped
+- Deduplication: identical or substantially similar entries are skipped (bidirectional substring matching)
 - Capped at 100 entries, oldest entries removed on overflow
 - Timestamped for traceability
 - Saved to `data/memory.md`
@@ -148,8 +148,6 @@ Execute shell commands in an isolated Debian Docker container with Bun runtime:
 - All users' commands run inside `oven/bun:debian` containers
 - Bun and Node.js are pre-installed
 - Use `apt-get install` to install additional packages within the container
-- Owner: network enabled, configurable timeout
-- Others: network disabled, 15s timeout, output capped at 4096 chars
 
 ### `reset_container`
 Reset the Docker sandbox container (owner only):
@@ -174,6 +172,18 @@ Save important information to long-term memory:
 ```
 
 Duplicate entries are automatically detected and skipped.
+
+### `weather`
+Get current weather and forecast for any location:
+```
+@YourBot what's the weather in Seoul?
+```
+
+### `send_file`
+Send files from the Docker workspace as Discord attachments:
+```
+@YourBot create a script and send it to me
+```
 
 ### `schedule`
 Schedule recurring tasks with cron expressions:
@@ -228,21 +238,14 @@ Scheduled tasks are automatically saved to `data/schedules.json` and restored on
 ```
 rustclaw/
 ├── src/
-│   ├── main.rs           # Entry point
+│   ├── main.rs           # Entry point with graceful shutdown
 │   ├── config.rs         # Configuration
-│   ├── agent/
-│   │   ├── mod.rs
-│   │   ├── rig_agent.rs  # AI agent + Rig integration + permission-aware preamble
-│   │   └── tools/        # Tool implementations
-│   ├── discord/
-│   │   ├── mod.rs
-│   │   └── bot.rs        # Discord event handler
-│   ├── memory/
-│   │   ├── mod.rs
-│   │   └── manager.rs    # Memory management with dedup & auto-archive
-│   └── scheduler/
-│       ├── mod.rs
-│       └── cron.rs       # Task scheduler
+│   ├── utils.rs          # Shared utilities (split_message, etc.)
+│   ├── agent.rs          # AI agent + Rig integration + cached API client
+│   ├── tools/            # Tool implementations
+│   ├── discord.rs        # Discord event handler
+│   ├── memory.rs         # Memory management with dedup & auto-archive
+│   └── scheduler.rs      # Task scheduler
 └── data/
     ├── recent.md         # Short-term memory (max 200 messages)
     ├── memory.md         # Long-term memory (max 100 entries)

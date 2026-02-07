@@ -3,8 +3,11 @@ mod config;
 mod discord;
 mod memory;
 mod scheduler;
+mod tools;
+mod utils;
 
 use anyhow::Result;
+use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -25,8 +28,28 @@ async fn main() -> Result<()> {
     agent.set_scheduler(scheduler.clone()).await;
     scheduler.start().await?;
 
-    let discord_bot = discord::Bot::new(config, agent, memory_manager, scheduler).await?;
-    discord_bot.start().await?;
+    let discord_bot =
+        discord::Bot::new(config, agent, memory_manager.clone(), scheduler.clone()).await?;
+
+    let bot_handle = tokio::spawn(async move {
+        if let Err(e) = discord_bot.start().await {
+            tracing::error!("Discord bot error: {}", e);
+        }
+    });
+
+    tokio::signal::ctrl_c().await?;
+    info!("Shutdown signal received, saving state...");
+
+    if let Err(e) = memory_manager.flush().await {
+        warn!("Failed to flush memory on shutdown: {}", e);
+    }
+
+    if let Err(e) = scheduler.shutdown().await {
+        warn!("Failed to shutdown scheduler: {}", e);
+    }
+
+    bot_handle.abort();
+    info!("Shutdown complete");
 
     Ok(())
 }

@@ -246,7 +246,10 @@ impl RunCommand {
             }
             Ok(Err(e)) => Err(e),
             Err(_) => {
-                warn!("Command execution timed out after {}s", self.config.command_timeout);
+                warn!(
+                    "Command execution timed out after {}s",
+                    self.config.command_timeout
+                );
                 Err(ToolError::Timeout)
             }
         }
@@ -317,6 +320,9 @@ impl Tool for ResetContainer {
 
     async fn call(&self, _args: Self::Args) -> Result<Self::Output, Self::Error> {
         RunCommand::reset_container(&self.config).await?;
-        Ok("Container reset successfully. A new container will be created on the next command.".to_string())
+        Ok(
+            "Container reset successfully. A new container will be created on the next command."
+                .to_string(),
+        )
     }
 }

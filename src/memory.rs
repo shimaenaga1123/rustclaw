@@ -121,17 +121,17 @@ impl MemoryManager {
 
         let is_duplicate = long_term.iter().any(|entry| {
             let existing = entry
-                .trim()
-                .to_lowercase()
-                .split(']')
-                .next_back()
+                .find(']')
+                .map(|i| &entry[i + 1..])
                 .unwrap_or(entry)
                 .trim()
-                .to_string();
+                .to_lowercase();
+
             existing == content_normalized
                 || (existing.len() > 10
                     && content_normalized.len() > 10
-                    && existing.contains(&content_normalized))
+                    && (existing.contains(&content_normalized)
+                        || content_normalized.contains(&existing)))
         });
 
         if is_duplicate {
@@ -147,6 +147,17 @@ impl MemoryManager {
         }
 
         self.save_long_term(&long_term).await
+    }
+
+    pub async fn flush(&self) -> Result<()> {
+        let recent = self.recent.read().await;
+        self.save_recent(&recent).await?;
+
+        let long_term = self.long_term.read().await;
+        self.save_long_term(&long_term).await?;
+
+        info!("Memory flushed to disk");
+        Ok(())
     }
 
     async fn archive_messages(&self, messages: &[String]) -> Result<()> {
