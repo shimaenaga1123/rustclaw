@@ -34,11 +34,14 @@ iana-time-zone = "0.1.65"
 uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.13", features = ["json", "query"] }
 bollard = "0.20"
+typst = "0.14"
+typst-render = "0.14"
+typst-assets = { version = "0.14", features = ["fonts"] }
+tiny-skia = "0.11"
 
-lancedb = { version = "0.26", default-features = false }
 fastembed = "5"
-arrow-array = "57"
-arrow-schema = "57"
+usearch = "2"
+sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
 
 [profile.release]
 strip = true

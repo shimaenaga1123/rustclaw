@@ -6,11 +6,13 @@ A lightweight, memory-aware Discord AI assistant powered by Anthropic-compatible
 
 - **Discord Integration**: Mention-based interaction
 - **Anthropic-compatible API**: Works with Claude, Minimax, and other Anthropic-compatible endpoints via [Rig](https://github.com/0xPlaygrounds/rig)
-- **Vector Memory System**: LanceDB-powered semantic memory with local embeddings (multilingual-e5-small)
+- **Vector Memory System**: usearch + SQLite powered semantic memory with local embeddings (multilingual-e5-small)
   - **Important Facts**: Owner-managed persistent facts, always included in context
   - **Conversation History**: Every turn stored with embeddings for semantic retrieval
-  - **Hybrid Context**: Recent 20 turns + top 10 semantically similar past conversations
-- **Tool Calling**: Shell command execution, web search, and memory operations
+  - **Hybrid Context**: Recent 5 turns + top 10 semantically similar past conversations
+  - **On-demand Search**: Explicit semantic search tool for deeper memory recall
+- **Tool Calling**: Shell command execution, web search, memory operations, and Typst rendering
+- **Typst Rendering**: Tables, math equations, and formatted content rendered as PNG via embedded Typst compiler
 - **Sandboxed Execution**: All commands run in isolated Debian Docker containers with Bun runtime
 - **Owner Permission System**: Owner/non-owner distinction with AI-level awareness for safe multi-user operation
 - **Brave Search**: Optional web search integration
@@ -199,31 +201,34 @@ RustClaw distinguishes between the **bot owner** and **regular users**. The AI m
 
 ## Memory System
 
-RustClaw uses a vector-based memory system powered by **LanceDB** and **fastembed** (multilingual-e5-small) for local, GPU-free semantic search.
+RustClaw uses a vector-based memory system powered by **usearch** (HNSW index) and **SQLite** for storage, with **fastembed** (multilingual-e5-small) for local, GPU-free semantic search.
 
 ### Important Facts (`important` table)
 - Owner-managed key facts (preferences, dates, decisions)
 - Always loaded in full into every conversation context
 - CRUD via `important_add`, `important_list`, `important_delete` tools (owner only)
-- Stored with vector embeddings for future extensibility
 
-### Conversation History (`long_term_memory` table)
+### Conversation History (`conversations` table)
 - Every conversation turn (user input + assistant response) stored immediately
-- Each turn is embedded for semantic retrieval
+- Each turn is embedded and indexed in usearch for semantic retrieval
 - No compression or summarization — original text preserved
 - Context includes:
-  - **Recent 20 turns**: maintains conversation flow and continuity
+  - **Recent 5 turns**: maintains conversation flow and continuity
   - **Semantic top 10**: past turns most relevant to the current input (deduplicated against recent)
 
-### How Context is Built
+### On-demand Search (`search_memory` tool)
+- Explicitly search past conversations by semantic similarity
+- Returns up to 20 matching turns with timestamps and content
+- Useful when the automatic context window doesn't cover the needed history
 
+### How Context is Built
 ```
 ┌─────────────────────────────────┐
 │  # Important Facts              │  ← All entries, always
 │  - User prefers dark mode       │
 │  - Birthday is January 1st      │
 ├─────────────────────────────────┤
-│  # Recent Conversations         │  ← Last 20 turns (chronological)
+│  # Recent Conversations         │  ← Last 5 turns (chronological)
 │  User: ...                      │
 │  Assistant: ...                 │
 ├─────────────────────────────────┤
@@ -235,9 +240,9 @@ RustClaw uses a vector-based memory system powered by **LanceDB** and **fastembe
 
 ### Data Storage
 
-All data is stored in `data/lancedb/` using the Lance columnar format. No `.md` files, no plain-text archives.
-
-The embedding model is cached in `data/models/` after the initial download.
+- Metadata and text: `data/memory.db` (SQLite)
+- Vector index: `data/conversations.usearch` (usearch HNSW)
+- Embedding model cache: `data/models/`
 
 ## Tools
 
@@ -268,6 +273,29 @@ Search the web using Brave API:
 ```
 @YourBot search for latest rust news
 ```
+
+### `typst_render`
+Render Typst markup as a PNG image and send as a Discord attachment:
+```
+@YourBot render this table:
+| Name | Score |
+| Alice | 95 |
+
+@YourBot render the equation x^2 + y^2 = z^2
+```
+
+- Tables, math equations, and formatted documents
+- Rendered via the embedded Typst compiler (no external binary needed)
+- Fonts bundled via typst-assets
+
+### `search_memory`
+Search past conversations semantically:
+```
+@YourBot search memory for our discussion about database migration
+```
+
+- Returns the most relevant past conversation turns
+- Useful for recalling specific past discussions
 
 ### `important_add`
 Save important information to persistent memory (owner only):
@@ -349,6 +377,7 @@ Scheduled tasks are automatically saved to `data/schedules.json` and restored on
 
 ## Project Structure
 
+## Project Structure
 ```
 rustclaw/
 ├── src/
@@ -356,14 +385,15 @@ rustclaw/
 │   ├── config.rs         # Configuration
 │   ├── utils.rs          # Shared utilities (split_message, etc.)
 │   ├── embeddings.rs     # Local embedding service (fastembed, multilingual-e5-small)
-│   ├── vectordb.rs       # LanceDB wrapper (long_term_memory + important tables)
-│   ├── agent.rs          # AI agent + Rig integration + cached API client
+│   ├── vectordb.rs       # usearch + SQLite wrapper (conversations + important)
+│   ├── agent.rs          # AI agent + Rig integration
 │   ├── tools/            # Tool implementations
 │   ├── discord.rs        # Discord event handler
 │   ├── memory.rs         # Memory manager (delegates to VectorDb)
 │   └── scheduler.rs      # Task scheduler
 └── data/
-    ├── lancedb/          # Vector database (long_term_memory + important)
+    ├── memory.db         # SQLite database (conversations + important)
+    ├── conversations.usearch  # usearch vector index
     ├── models/           # Cached embedding model (~130MB)
     ├── workspace/        # Docker sandbox mount
     └── schedules.json    # Scheduled tasks
@@ -437,9 +467,9 @@ Keybindings: `c` check, `l` clippy, `t` test, `r` run, `d` doc
 
 The model is downloaded from HuggingFace on first run. Ensure network access to `huggingface.co`. The model is cached in `data/models/` — delete this directory to force re-download.
 
-### LanceDB errors
+### Database errors
 
-If the database becomes corrupted, delete `data/lancedb/` to start fresh. All conversation history will be lost, but important facts can be re-added.
+If the database becomes corrupted, delete `data/memory.db` and `data/conversations.usearch` to start fresh. All conversation history will be lost, but important facts can be re-added.
 
 ### Auto-update not working
 
@@ -506,8 +536,10 @@ MIT License - see [LICENSE](LICENSE) for details
 - [NanoClaw](https://github.com/gavrielc/nanoclaw) - Original inspiration
 - [Rig](https://github.com/0xPlaygrounds/rig) - AI framework
 - [serenity](https://github.com/serenity-rs/serenity) - Discord library
-- [LanceDB](https://lancedb.com/) - Vector database
+- [usearch](https://github.com/unum-cloud/usearch) - Vector search engine
+- [SQLite](https://sqlite.org/) via [sqlx](https://github.com/launchbadge/sqlx) - Database
 - [fastembed](https://github.com/Anush008/fastembed-rs) - Local embedding inference
+- [Typst](https://typst.app/) - Markup-based typesetting
 - [cargo-dist](https://github.com/axodotdev/cargo-dist) - Release automation
 
 ## Support

@@ -1,115 +1,101 @@
 use crate::embeddings::{EMBEDDING_DIM, EmbeddingService};
 use anyhow::{Context, Result};
-use arrow_array::{
-    ArrayRef, FixedSizeListArray, Float32Array, RecordBatch, RecordBatchIterator, StringArray,
-    TimestampMicrosecondArray,
-};
-use arrow_schema::{DataType, Field, Schema, TimeUnit};
-use chrono::Utc;
-use futures_util::TryStreamExt;
-use lancedb::{
-    Connection, connect,
-    query::{ExecutableQuery, QueryBase},
-};
-use std::path::Path;
-use std::sync::Arc;
+use sqlx::FromRow;
+use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 use tracing::info;
+use usearch::Index;
+use usearch::ffi::{IndexOptions, MetricKind, ScalarKind};
 
-const LONG_TERM_TABLE: &str = "long_term_memory";
-const IMPORTANT_TABLE: &str = "important";
+const INDEX_FILE: &str = "conversations.usearch";
+
+#[derive(FromRow)]
+struct ConversationRow {
+    id: String,
+    author: String,
+    user_input: String,
+    assistant_response: String,
+    timestamp_us: i64,
+}
+
+#[derive(FromRow)]
+struct ImportantRow {
+    id: String,
+    content: String,
+    timestamp_us: i64,
+}
 
 pub struct VectorDb {
-    db: Connection,
+    pool: SqlitePool,
+    index: Arc<Mutex<Index>>,
     embeddings: Arc<EmbeddingService>,
+    index_path: PathBuf,
 }
 
 impl VectorDb {
     pub async fn new(data_dir: &Path, embeddings: Arc<EmbeddingService>) -> Result<Arc<Self>> {
-        let db_path = data_dir.join("lancedb");
-        std::fs::create_dir_all(&db_path)?;
+        let db_path = data_dir.join("memory.db");
+        std::fs::create_dir_all(data_dir)?;
+        let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
 
-        let db = connect(db_path.to_str().unwrap())
-            .execute()
+        let pool = SqlitePoolOptions::new()
+            .max_connections(5)
+            .connect(&db_url)
             .await
-            .context("Failed to open LanceDB")?;
+            .context("Failed to connect to SQLite")?;
 
-        let instance = Arc::new(Self { db, embeddings });
-        instance.ensure_tables().await?;
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS conversations (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT UNIQUE NOT NULL,
+                author TEXT NOT NULL,
+                user_input TEXT NOT NULL,
+                assistant_response TEXT NOT NULL,
+                timestamp_us INTEGER NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await?;
 
-        info!("VectorDB ready");
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS important (
+                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
+                id TEXT UNIQUE NOT NULL,
+                content TEXT NOT NULL,
+                timestamp_us INTEGER NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await?;
+
+        let index_path = data_dir.join(INDEX_FILE);
+        let options = IndexOptions {
+            dimensions: EMBEDDING_DIM as usize,
+            metric: MetricKind::Cos,
+            quantization: ScalarKind::F32,
+            ..Default::default()
+        };
+        let index = Index::new(&options).context("Failed to create usearch index")?;
+
+        if index_path.exists() {
+            index
+                .load(index_path.to_str().unwrap())
+                .context("Failed to load usearch index")?;
+            info!("Loaded usearch index ({} vectors)", index.size());
+        } else {
+            index.reserve(10000).context("Failed to reserve index")?;
+        }
+
+        let instance = Arc::new(Self {
+            pool,
+            index: Arc::new(Mutex::new(index)),
+            embeddings,
+            index_path,
+        });
+
+        info!("VectorDB ready (usearch + SQLite)");
         Ok(instance)
-    }
-
-    fn long_term_schema() -> Arc<Schema> {
-        Arc::new(Schema::new(vec![
-            Field::new("id", DataType::Utf8, false),
-            Field::new("author", DataType::Utf8, false),
-            Field::new("user_input", DataType::Utf8, false),
-            Field::new("assistant_response", DataType::Utf8, false),
-            Field::new(
-                "timestamp",
-                DataType::Timestamp(TimeUnit::Microsecond, None),
-                false,
-            ),
-            Field::new(
-                "vector",
-                DataType::FixedSizeList(
-                    Arc::new(Field::new("item", DataType::Float32, true)),
-                    EMBEDDING_DIM,
-                ),
-                true,
-            ),
-        ]))
-    }
-
-    fn important_schema() -> Arc<Schema> {
-        Arc::new(Schema::new(vec![
-            Field::new("id", DataType::Utf8, false),
-            Field::new("content", DataType::Utf8, false),
-            Field::new(
-                "timestamp",
-                DataType::Timestamp(TimeUnit::Microsecond, None),
-                false,
-            ),
-            Field::new(
-                "vector",
-                DataType::FixedSizeList(
-                    Arc::new(Field::new("item", DataType::Float32, true)),
-                    EMBEDDING_DIM,
-                ),
-                true,
-            ),
-        ]))
-    }
-
-    async fn ensure_tables(&self) -> Result<()> {
-        let existing: Vec<String> = self.db.table_names().execute().await?;
-
-        if !existing.iter().any(|n| n == LONG_TERM_TABLE) {
-            let schema = Self::long_term_schema();
-            let batch = RecordBatch::new_empty(schema.clone());
-            let reader = RecordBatchIterator::new(vec![Ok(batch)], schema);
-            self.db
-                .create_table(LONG_TERM_TABLE, Box::new(reader))
-                .execute()
-                .await
-                .context("Failed to create long_term_memory table")?;
-            info!("Created table: {}", LONG_TERM_TABLE);
-        }
-
-        if !existing.iter().any(|n| n == IMPORTANT_TABLE) {
-            let schema = Self::important_schema();
-            let batch = RecordBatch::new_empty(schema.clone());
-            let reader = RecordBatchIterator::new(vec![Ok(batch)], schema);
-            self.db
-                .create_table(IMPORTANT_TABLE, Box::new(reader))
-                .execute()
-                .await
-                .context("Failed to create important table")?;
-            info!("Created table: {}", IMPORTANT_TABLE);
-        }
-
-        Ok(())
     }
 
     pub async fn add_turn(
@@ -119,7 +105,7 @@ impl VectorDb {
         assistant_response: &str,
     ) -> Result<()> {
         let id = uuid::Uuid::new_v4().to_string();
-        let now = Utc::now().timestamp_micros();
+        let now = chrono::Utc::now().timestamp_micros();
 
         let combined = format!(
             "{}: {}\nAssistant: {}",
@@ -127,93 +113,48 @@ impl VectorDb {
         );
         let embedding = self.embeddings.embed_passage(&combined).await?;
 
-        let schema = Self::long_term_schema();
-        let vector_array = make_fixed_list_array(&embedding, EMBEDDING_DIM);
+        let result = sqlx::query(
+            "INSERT INTO conversations (id, author, user_input, assistant_response, timestamp_us) VALUES (?, ?, ?, ?, ?)",
+        )
+            .bind(&id)
+            .bind(author)
+            .bind(user_input)
+            .bind(assistant_response)
+            .bind(now)
+            .execute(&self.pool)
+            .await?;
 
-        let batch = RecordBatch::try_new(
-            schema.clone(),
-            vec![
-                Arc::new(StringArray::from(vec![id.as_str()])) as ArrayRef,
-                Arc::new(StringArray::from(vec![author])),
-                Arc::new(StringArray::from(vec![user_input])),
-                Arc::new(StringArray::from(vec![assistant_response])),
-                Arc::new(TimestampMicrosecondArray::from(vec![now])),
-                vector_array,
-            ],
-        )?;
+        let rowid = result.last_insert_rowid() as u64;
 
-        let table = self.db.open_table(LONG_TERM_TABLE).execute().await?;
-        let reader = RecordBatchIterator::new(vec![Ok(batch)], schema);
-        table.add(Box::new(reader)).execute().await?;
+        let index = self.index.clone();
+        let index_path = self.index_path.clone();
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            let idx = index.lock().unwrap();
+            if idx.size() + 1 >= idx.capacity() {
+                idx.reserve(idx.capacity() + 10000)
+                    .map_err(|e| anyhow::anyhow!("{}", e))?;
+            }
+            idx.add(rowid, &embedding)
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            idx.save(index_path.to_str().unwrap())
+                .map_err(|e| anyhow::anyhow!("{}", e))?;
+            Ok(())
+        })
+        .await??;
 
         Ok(())
     }
 
     pub async fn recent_turns(&self, n: usize) -> Result<Vec<ConversationTurn>> {
-        let table = self.db.open_table(LONG_TERM_TABLE).execute().await?;
-
-        let batches: Vec<RecordBatch> = table
-            .query()
-            .select(lancedb::query::Select::columns(&[
-                "id",
-                "author",
-                "user_input",
-                "assistant_response",
-                "timestamp",
-            ]))
-            .execute()
-            .await?
-            .try_collect()
+        let rows = sqlx::query_as::<_, ConversationRow>(
+            "SELECT id, author, user_input, assistant_response, timestamp_us FROM conversations ORDER BY timestamp_us DESC LIMIT ?",
+        )
+            .bind(n as i64)
+            .fetch_all(&self.pool)
             .await?;
 
-        let mut turns: Vec<ConversationTurn> = Vec::new();
-        for batch in &batches {
-            let ids = batch
-                .column_by_name("id")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .unwrap();
-            let authors = batch
-                .column_by_name("author")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .unwrap();
-            let inputs = batch
-                .column_by_name("user_input")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .unwrap();
-            let responses = batch
-                .column_by_name("assistant_response")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .unwrap();
-            let timestamps = batch
-                .column_by_name("timestamp")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<TimestampMicrosecondArray>()
-                .unwrap();
-
-            for i in 0..batch.num_rows() {
-                turns.push(ConversationTurn {
-                    id: ids.value(i).to_string(),
-                    author: authors.value(i).to_string(),
-                    user_input: inputs.value(i).to_string(),
-                    assistant_response: responses.value(i).to_string(),
-                    timestamp_micros: timestamps.value(i),
-                });
-            }
-        }
-
-        turns.sort_by(|a, b| b.timestamp_micros.cmp(&a.timestamp_micros));
-        turns.truncate(n);
+        let mut turns: Vec<ConversationTurn> = rows.into_iter().map(|r| r.into()).collect();
         turns.reverse();
-
         Ok(turns)
     }
 
@@ -224,165 +165,77 @@ impl VectorDb {
         exclude_ids: &[String],
     ) -> Result<Vec<ConversationTurn>> {
         let embedding = self.embeddings.embed_query(query).await?;
-        let table = self.db.open_table(LONG_TERM_TABLE).execute().await?;
+        let fetch_n = top_k + exclude_ids.len() + 5;
 
-        let fetch_n = top_k + exclude_ids.len();
+        let index = self.index.clone();
+        let results = tokio::task::spawn_blocking(move || {
+            let idx = index.lock().unwrap();
+            idx.search(&embedding, fetch_n)
+        })
+        .await?
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
 
-        let batches: Vec<RecordBatch> = table
-            .query()
-            .nearest_to(embedding)?
-            .limit(fetch_n)
-            .select(lancedb::query::Select::columns(&[
-                "id",
-                "author",
-                "user_input",
-                "assistant_response",
-                "timestamp",
-            ]))
-            .execute()
-            .await?
-            .try_collect()
-            .await?;
-
-        let mut turns = Vec::new();
-        for batch in &batches {
-            let ids = batch
-                .column_by_name("id")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .unwrap();
-            let authors = batch
-                .column_by_name("author")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .unwrap();
-            let inputs = batch
-                .column_by_name("user_input")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .unwrap();
-            let responses = batch
-                .column_by_name("assistant_response")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .unwrap();
-            let timestamps = batch
-                .column_by_name("timestamp")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<TimestampMicrosecondArray>()
-                .unwrap();
-
-            for i in 0..batch.num_rows() {
-                let id = ids.value(i).to_string();
-                if exclude_ids.contains(&id) {
-                    continue;
-                }
-                turns.push(ConversationTurn {
-                    id,
-                    author: authors.value(i).to_string(),
-                    user_input: inputs.value(i).to_string(),
-                    assistant_response: responses.value(i).to_string(),
-                    timestamp_micros: timestamps.value(i),
-                });
-                if turns.len() >= top_k {
-                    break;
-                }
-            }
-            if turns.len() >= top_k {
-                break;
-            }
+        let rowids: Vec<i64> = results.keys.iter().map(|k| *k as i64).collect();
+        if rowids.is_empty() {
+            return Ok(Vec::new());
         }
 
+        let placeholders: String = rowids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT id, author, user_input, assistant_response, timestamp_us \
+             FROM conversations WHERE rowid IN ({})",
+            placeholders
+        );
+
+        let mut q = sqlx::query_as::<_, ConversationRow>(&sql);
+        for rowid in &rowids {
+            q = q.bind(rowid);
+        }
+        let rows = q.fetch_all(&self.pool).await?;
+
+        let mut turns: Vec<ConversationTurn> = rows
+            .into_iter()
+            .map(|r| r.into())
+            .filter(|t: &ConversationTurn| !exclude_ids.contains(&t.id))
+            .collect();
+
         turns.sort_by(|a, b| a.timestamp_micros.cmp(&b.timestamp_micros));
+        turns.truncate(top_k);
         Ok(turns)
     }
 
     pub async fn add_important(&self, content: &str) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string()[..8].to_string();
-        let now = Utc::now().timestamp_micros();
-        let embedding = self.embeddings.embed_passage(content).await?;
+        let now = chrono::Utc::now().timestamp_micros();
 
-        let schema = Self::important_schema();
-        let vector_array = make_fixed_list_array(&embedding, EMBEDDING_DIM);
-
-        let batch = RecordBatch::try_new(
-            schema.clone(),
-            vec![
-                Arc::new(StringArray::from(vec![id.as_str()])) as ArrayRef,
-                Arc::new(StringArray::from(vec![content])),
-                Arc::new(TimestampMicrosecondArray::from(vec![now])),
-                vector_array,
-            ],
-        )?;
-
-        let table = self.db.open_table(IMPORTANT_TABLE).execute().await?;
-        let reader = RecordBatchIterator::new(vec![Ok(batch)], schema);
-        table.add(Box::new(reader)).execute().await?;
+        sqlx::query("INSERT INTO important (id, content, timestamp_us) VALUES (?, ?, ?)")
+            .bind(&id)
+            .bind(content)
+            .bind(now)
+            .execute(&self.pool)
+            .await?;
 
         info!("Added important entry: {}", id);
         Ok(id)
     }
 
     pub async fn list_important(&self) -> Result<Vec<ImportantEntry>> {
-        let table = self.db.open_table(IMPORTANT_TABLE).execute().await?;
+        let rows = sqlx::query_as::<_, ImportantRow>(
+            "SELECT id, content, timestamp_us FROM important ORDER BY timestamp_us ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
 
-        let batches: Vec<RecordBatch> = table
-            .query()
-            .select(lancedb::query::Select::columns(&[
-                "id",
-                "content",
-                "timestamp",
-            ]))
-            .execute()
-            .await?
-            .try_collect()
-            .await?;
-
-        let mut entries = Vec::new();
-        for batch in &batches {
-            let ids = batch
-                .column_by_name("id")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .unwrap();
-            let contents = batch
-                .column_by_name("content")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<StringArray>()
-                .unwrap();
-            let timestamps = batch
-                .column_by_name("timestamp")
-                .unwrap()
-                .as_any()
-                .downcast_ref::<TimestampMicrosecondArray>()
-                .unwrap();
-
-            for i in 0..batch.num_rows() {
-                entries.push(ImportantEntry {
-                    id: ids.value(i).to_string(),
-                    content: contents.value(i).to_string(),
-                    timestamp_micros: timestamps.value(i),
-                });
-            }
-        }
-
-        entries.sort_by(|a, b| a.timestamp_micros.cmp(&b.timestamp_micros));
-        Ok(entries)
+        Ok(rows.into_iter().map(|r| r.into()).collect())
     }
 
     pub async fn delete_important(&self, id: &str) -> Result<bool> {
-        let table = self.db.open_table(IMPORTANT_TABLE).execute().await?;
-        let filter = format!("id = '{}'", id.replace('\'', "''"));
-        table.delete(&filter).await?;
+        let result = sqlx::query("DELETE FROM important WHERE id = ?")
+            .bind(id)
+            .execute(&self.pool)
+            .await?;
         info!("Deleted important entry: {}", id);
-        Ok(true)
+        Ok(result.rows_affected() > 0)
     }
 
     pub async fn get_important_context(&self) -> Result<String> {
@@ -417,6 +270,18 @@ impl ConversationTurn {
     }
 }
 
+impl From<ConversationRow> for ConversationTurn {
+    fn from(r: ConversationRow) -> Self {
+        Self {
+            id: r.id,
+            author: r.author,
+            user_input: r.user_input,
+            assistant_response: r.assistant_response,
+            timestamp_micros: r.timestamp_us,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ImportantEntry {
     pub id: String,
@@ -424,11 +289,12 @@ pub struct ImportantEntry {
     pub timestamp_micros: i64,
 }
 
-fn make_fixed_list_array(values: &[f32], dim: i32) -> ArrayRef {
-    let float_array = Float32Array::from(values.to_vec());
-    let field = Arc::new(Field::new("item", DataType::Float32, true));
-    Arc::new(
-        FixedSizeListArray::try_new(field, dim, Arc::new(float_array), None)
-            .expect("Failed to create FixedSizeListArray"),
-    )
+impl From<ImportantRow> for ImportantEntry {
+    fn from(r: ImportantRow) -> Self {
+        Self {
+            id: r.id,
+            content: r.content,
+            timestamp_micros: r.timestamp_us,
+        }
+    }
 }

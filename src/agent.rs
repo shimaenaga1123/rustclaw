@@ -167,9 +167,13 @@ impl<C: CompletionClient> RigAgent<C> {
            Bun and Node.js are pre-installed. Installed packages persist across invocations. \
            For Python, install it first with `apt-get install -y python3`.\n\
          - **send_file**: Sends a file from /workspace as a Discord attachment. \
-           Use this when output is too long for a message, or when generating files (images, documents, code, etc.).\n\
-         - **send_markdown_table**: Renders markdown tables as images and sends them as Discord attachments. \
-           Use this when you need to display tables, since Discord doesn't support markdown table formatting.\n\
+           Use this when output is too long for a message, or when generating files.\n\
+         - **typst_render**: Renders Typst markup to a PNG image and sends it as a Discord attachment. \
+           Use this for tables, math equations ($x^2 + y^2 = z^2$), or any formatted content \
+           that Discord markdown cannot display. Write valid Typst markup.\n\
+         - **search_memory**: Searches past conversations semantically. Use when the user asks \
+           about previous discussions or when you need to recall something from past context \
+           beyond the recent/related turns already in the prompt.\n\
          - **remember**: Saves important facts to long-term memory. Use proactively when the user shares \
            personal preferences, important dates, project details, or anything worth recalling later.\n\
          - **web_search**: Searches the web via Brave Search. Use for current events, fact-checking, or \
@@ -249,9 +253,11 @@ impl<C: CompletionClient> RigAgent<C> {
                 pending_files: params.pending_files.clone(),
                 config: params.config.clone(),
             })
-            .tool(super::tools::SendMarkdownTable {
+            .tool(super::tools::TypstRender {
                 pending_files: params.pending_files.clone(),
-                config: params.config.clone(),
+            })
+            .tool(super::tools::SearchMemory {
+                vectordb: params.memory.vectordb().clone(),
             })
             .tool(super::tools::Weather {
                 client: reqwest::Client::new(),
