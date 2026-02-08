@@ -204,7 +204,6 @@ esac
 case "${PLATFORM}-${ARCH}" in
     linux-x86_64)   TARGET="x86_64-unknown-linux-gnu" ;;
     macos-aarch64)  TARGET="aarch64-apple-darwin" ;;
-    macos-x86_64)   TARGET="x86_64-apple-darwin" ;;
     *)              echo "Error: No prebuilt binary for ${PLATFORM}-${ARCH}"; exit 1 ;;
 esac
 

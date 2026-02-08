@@ -15,7 +15,7 @@ A lightweight, memory-aware Discord AI assistant powered by Anthropic-compatible
 - **Owner Permission System**: Owner/non-owner distinction with AI-level awareness for safe multi-user operation
 - **Brave Search**: Optional web search integration
 - **Task Scheduler**: Cron-based task scheduling with persistence
-- **Auto-Update**: Automatic version checking and updating via systemd timer
+- **Auto-Update**: Automatic version checking and updating (systemd on Linux, launchd on macOS)
 
 ## Prerequisites
 
@@ -29,21 +29,29 @@ A lightweight, memory-aware Discord AI assistant powered by Anthropic-compatible
 
 ### Install from GitHub Releases (Recommended)
 
+Supports **Linux** (x86_64) and **macOS** (Apple Silicon). The installer auto-detects your platform.
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/shimaenaga1123/rustclaw/main/install.sh | bash
 ```
 
 This will:
-1. Download the latest release binary
-2. Install to `~/.local/share/rustclaw/`
-3. Set up systemd user service
-4. Enable daily auto-update checks
+1. Detect OS and architecture automatically
+2. Download the correct binary from the latest release
+3. Install to `~/.local/share/rustclaw/`
+4. Set up a background service (systemd on Linux, launchd on macOS)
+5. Enable daily auto-update checks
 
-After installation, edit the config:
+After installation, edit the config and start:
 
 ```bash
 nano ~/.local/share/rustclaw/config.toml
+
+# Linux
 systemctl --user start rustclaw
+
+# macOS
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.rustclaw.bot.plist
 ```
 
 ### Build from Source
@@ -76,6 +84,8 @@ docker pull oven/bun:debian  # optional, speeds up first run
 
 ## Service Management
 
+### Linux (systemd)
+
 ```bash
 systemctl --user start rustclaw      # Start
 systemctl --user stop rustclaw       # Stop
@@ -90,17 +100,30 @@ Enable auto-start on boot:
 sudo loginctl enable-linger $USER
 ```
 
+### macOS (launchd)
+
+```bash
+launchctl kickstart gui/$(id -u)/com.rustclaw.bot       # Start
+launchctl kill SIGTERM gui/$(id -u)/com.rustclaw.bot     # Stop
+launchctl kickstart -k gui/$(id -u)/com.rustclaw.bot     # Restart
+launchctl print gui/$(id -u)/com.rustclaw.bot            # Status
+tail -f ~/Library/Logs/rustclaw/rustclaw.log             # Logs
+```
+
+The service starts automatically on login via `RunAtLoad`.
+
 ## Auto-Update
 
-RustClaw includes a systemd timer that automatically checks for new releases and updates the binary.
+RustClaw automatically checks for new releases daily and updates the binary.
 
 ### How It Works
 
-- `rustclaw-update.timer` runs daily at 04:00 (±30 min randomized delay)
-- Compares the installed version against the latest GitHub Release
-- If a new version is found: downloads, stops the service, replaces the binary, restarts
+- **Linux**: `rustclaw-update.timer` runs daily at 04:00 (±30 min randomized delay)
+- **macOS**: `com.rustclaw.update` launchd agent runs daily at 04:00
+- Uses cargo-dist's built-in updater (`rustclaw-update`) for downloading and verification
+- After updating, the main service is automatically restarted
 
-### Managing Auto-Update
+### Managing Auto-Update (Linux)
 
 ```bash
 # Check timer status
@@ -117,6 +140,22 @@ systemctl --user disable --now rustclaw-update.timer
 
 # Re-enable auto-update
 systemctl --user enable --now rustclaw-update.timer
+```
+
+### Managing Auto-Update (macOS)
+
+```bash
+# Trigger manual update
+launchctl kickstart gui/$(id -u)/com.rustclaw.update
+
+# View update logs
+tail -f ~/Library/Logs/rustclaw/update.log
+
+# Disable auto-update
+launchctl bootout gui/$(id -u)/com.rustclaw.update
+
+# Re-enable auto-update
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.rustclaw.update.plist
 ```
 
 ### Check Installed Version
@@ -342,7 +381,7 @@ RustClaw uses [cargo-dist](https://github.com/axodotdev/cargo-dist) for release 
 
 ```bash
 cargo install cargo-dist cargo-release
-cargo dist init   # Select: GitHub CI, x86_64-unknown-linux-gnu, shell installer
+cargo dist init   # Select: GitHub CI, targets: x86_64-unknown-linux-gnu + aarch64-apple-darwin
 ```
 
 ### Cutting a Release
@@ -404,6 +443,8 @@ If the database becomes corrupted, delete `data/lancedb/` to start fresh. All co
 
 ### Auto-update not working
 
+**Linux:**
+
 ```bash
 # Check timer is active
 systemctl --user list-timers | grep rustclaw
@@ -411,9 +452,27 @@ systemctl --user list-timers | grep rustclaw
 # Run update manually and check output
 systemctl --user start rustclaw-update
 journalctl --user -u rustclaw-update --no-pager -n 20
+```
 
+**macOS:**
+
+```bash
+# Check agent is loaded
+launchctl print gui/$(id -u)/com.rustclaw.update
+
+# Run update manually and check output
+launchctl kickstart gui/$(id -u)/com.rustclaw.update
+tail -20 ~/Library/Logs/rustclaw/update.log
+```
+
+**Both platforms:**
+
+```bash
 # Ensure GitHub API is reachable
 curl -fsSL https://api.github.com/repos/shimaenaga1123/rustclaw/releases/latest | grep tag_name
+
+# Check updater binary exists
+ls -la ~/.local/share/rustclaw/rustclaw-update
 ```
 
 ### Discord bot not responding
