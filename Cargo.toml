@@ -32,7 +32,7 @@ chrono-tz = "0.10.4"
 iana-time-zone = "0.1.65"
 
 uuid = { version = "1", features = ["v4"] }
-reqwest = { version = "0.13", features = ["json", "query"] }
+reqwest = { version = "0.12", features = ["rustls-tls", "json"] }
 bollard = "0.20"
 typst = "0.14"
 typst-render = "0.14"
