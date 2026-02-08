@@ -5498,7 +5498,7 @@ dependencies = [
 
 [[package]]
 name = "rustclaw"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "anyhow",
  "arrow-array",
