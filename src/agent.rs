@@ -164,6 +164,10 @@ impl ApiClient {
             pending_files: params.pending_files.clone(),
             config: params.config.clone(),
         };
+        let send_markdown_table = super::tools::SendMarkdownTable {
+            pending_files: params.pending_files.clone(),
+            config: params.config.clone(),
+        };
         let weather = super::tools::Weather {
             client: reqwest::Client::new(),
         };
@@ -183,6 +187,7 @@ impl ApiClient {
                     .tool(run_command)
                     .tool(remember)
                     .tool(send_file)
+                    .tool(send_markdown_table.clone())
                     .tool(weather);
 
                 if params.is_owner {
@@ -233,6 +238,7 @@ impl ApiClient {
                     .tool(run_command)
                     .tool(remember)
                     .tool(send_file)
+                    .tool(send_markdown_table.clone())
                     .tool(weather);
 
                 if params.is_owner {
@@ -283,6 +289,7 @@ impl ApiClient {
                     .tool(run_command)
                     .tool(remember)
                     .tool(send_file)
+                    .tool(send_markdown_table)
                     .tool(weather);
 
                 if params.is_owner {
@@ -429,6 +436,8 @@ impl RigAgent {
            For Python, install it first with `apt-get install -y python3`.\n\
          - **send_file**: Sends a file from /workspace as a Discord attachment. \
            Use this when output is too long for a message, or when generating files (images, documents, code, etc.).\n\
+         - **send_markdown_table**: Renders markdown tables as images and sends them as Discord attachments. \
+           Use this when you need to display tables, since Discord doesn't support markdown table formatting.\n\
          - **remember**: Saves important facts to long-term memory. Use proactively when the user shares \
            personal preferences, important dates, project details, or anything worth recalling later.\n\
          - **web_search**: Searches the web via Brave Search. Use for current events, fact-checking, or \
