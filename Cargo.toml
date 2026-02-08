@@ -1,6 +1,6 @@
 [package]
 name = "rustclaw"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 repository = "https://github.com/shimaenaga1123/rustclaw"
 description = "A lightweight, memory-aware Discord AI assistant powered by Anthropic-compatible APIs, implemented in Rust. Inspired by nanoclaw and OpenClaw"
