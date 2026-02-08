@@ -1,6 +1,6 @@
 [package]
 name = "rustclaw"
-version = "1.0.3"
+version = "1.0.4"
 edition = "2024"
 repository = "https://github.com/shimaenaga1123/rustclaw"
 homepage = "https://github.com/shimaenaga1123/rustclaw"
