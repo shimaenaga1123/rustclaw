@@ -8,7 +8,7 @@ token = "your_discord_bot_token_here"
 owner_id = 123456789012345678
 
 [api]
-# API provider: "anthropic", "openai", "openai-compatible", "gemini"
+# API provider: "anthropic", "openai", "gemini"
 provider = "anthropic"
 key = "your_api_key_here"
 # URL can be customized for compatible APIs (e.g., Azure, local LLMs)
@@ -23,7 +23,7 @@ model = "claude-sonnet-4-20250514"
 # model = "gpt-4o"
 #
 # [api]
-# provider = "openai-compatible"
+# provider = "openai"
 # key = "your_key"
 # url = "http://localhost:11434/v1"  # e.g., Ollama
 # model = "llama3"
@@ -41,12 +41,8 @@ model = "claude-sonnet-4-20250514"
 [storage]
 data_dir = "data"
 
-[context]
-limit = 128000
-threshold = 0.8
-
 [commands]
-# Command timeout in seconds (non-owner capped at 15s)
+# Command timeout in seconds
 timeout = 30
 
 [model]

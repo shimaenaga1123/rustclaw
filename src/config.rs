@@ -8,7 +8,6 @@ struct ConfigFile {
     api: ApiConfig,
     brave: BraveConfig,
     storage: StorageConfig,
-    context: ContextConfig,
     commands: CommandsConfig,
     model: ModelConfig,
 }
@@ -38,12 +37,6 @@ struct StorageConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct ContextConfig {
-    limit: usize,
-    threshold: f32,
-}
-
-#[derive(Debug, Clone, Deserialize)]
 struct CommandsConfig {
     timeout: u64,
 }
@@ -63,8 +56,6 @@ pub struct Config {
     pub model: String,
     pub brave_api_key: Option<String>,
     pub data_dir: PathBuf,
-    pub context_limit: usize,
-    pub context_threshold: f32,
     pub command_timeout: u64,
     pub disable_reasoning: bool,
 }
@@ -86,8 +77,6 @@ impl Config {
             model: config_file.api.model,
             brave_api_key: config_file.brave.api_key,
             data_dir: config_file.storage.data_dir.into(),
-            context_limit: config_file.context.limit,
-            context_threshold: config_file.context.threshold,
             command_timeout: config_file.commands.timeout,
             disable_reasoning: config_file.model.disable_reasoning,
         })

@@ -5,14 +5,13 @@ use futures_util::StreamExt;
 use rig::{
     agent::MultiTurnStreamItem,
     client::CompletionClient,
-    completion::{CompletionModel, GetTokenUsage, Prompt},
+    completion::{CompletionModel, GetTokenUsage},
     providers::{anthropic, gemini, openai},
     streaming::{StreamedAssistantContent, StreamingPrompt},
 };
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock, mpsc};
-use tracing::info;
+use tokio::sync::{RwLock, mpsc};
 
 #[derive(Debug, Clone)]
 pub struct PendingFile {
@@ -128,7 +127,6 @@ pub struct RigAgent<C: CompletionClient> {
     memory: Arc<MemoryManager>,
     scheduler: RwLock<Option<Arc<Scheduler>>>,
     client: C,
-    compress_lock: Mutex<()>,
 }
 
 impl<C: CompletionClient> RigAgent<C> {
@@ -138,7 +136,6 @@ impl<C: CompletionClient> RigAgent<C> {
             memory,
             scheduler: RwLock::new(None),
             client,
-            compress_lock: Mutex::new(()),
         }))
     }
 
@@ -192,10 +189,11 @@ impl<C: CompletionClient> RigAgent<C> {
         // Memory
         preamble.push_str(
             "# Memory\n\
-         You have access to short-term conversation history and long-term memory. \
-         Long-term memory entries appear at the top of the context under '# Long-term Memory'. \
-         Use the remember tool to save new important information. \
-         Avoid storing duplicate or trivial information.\n\n",
+         You have access to a vector-based memory system powered by LanceDB.\n\
+         - **Important Facts**: Key facts appear under '# Important Facts'. Use important_add to save new ones (owner only).\n\
+         - **Recent Conversations**: The last 20 conversation turns are included for continuity.\n\
+         - **Related Past Conversations**: Semantically similar past conversations are automatically retrieved.\n\
+         Use important_add proactively when the owner shares preferences, important dates, or key decisions.\n\n",
         );
 
         // Permission level
@@ -227,35 +225,37 @@ impl<C: CompletionClient> RigAgent<C> {
     where
         <C as CompletionClient>::CompletionModel: 'static,
     {
-        let run_command = super::tools::RunCommand {
-            config: params.config.clone(),
-            is_owner: params.is_owner,
-        };
-        let remember = super::tools::Remember {
-            memory: params.memory.clone(),
-        };
-        let send_file = super::tools::SendFile {
-            pending_files: params.pending_files.clone(),
-            config: params.config.clone(),
-        };
-        let send_markdown_table = super::tools::SendMarkdownTable {
-            pending_files: params.pending_files.clone(),
-            config: params.config.clone(),
-        };
-        let weather = super::tools::Weather {
-            client: reqwest::Client::new(),
-        };
-
         let mut builder = self
             .client
             .agent(params.model)
             .preamble(params.preamble)
             .max_tokens(4096)
-            .tool(run_command)
-            .tool(remember)
-            .tool(send_file)
-            .tool(send_markdown_table)
-            .tool(weather);
+            .tool(super::tools::RunCommand {
+                config: params.config.clone(),
+                is_owner: params.is_owner,
+            })
+            .tool(super::tools::ImportantAdd {
+                vectordb: params.memory.vectordb().clone(),
+                is_owner: params.is_owner,
+            })
+            .tool(super::tools::ImportantList {
+                vectordb: params.memory.vectordb().clone(),
+            })
+            .tool(super::tools::ImportantDelete {
+                vectordb: params.memory.vectordb().clone(),
+                is_owner: params.is_owner,
+            })
+            .tool(super::tools::SendFile {
+                pending_files: params.pending_files.clone(),
+                config: params.config.clone(),
+            })
+            .tool(super::tools::SendMarkdownTable {
+                pending_files: params.pending_files.clone(),
+                config: params.config.clone(),
+            })
+            .tool(super::tools::Weather {
+                client: reqwest::Client::new(),
+            });
 
         if params.disable_reasoning {
             builder =
@@ -336,28 +336,6 @@ impl<C: CompletionClient> RigAgent<C> {
         let _ = tx.send(StreamEvent::Done).await;
         Ok(response_text)
     }
-
-    async fn summarize_context(&self, context: &str) -> Result<String> {
-        let preamble = "Summarize only the key points of the conversation. \
-                        Be concise but preserve important facts, user preferences, and decisions made.";
-
-        let mut builder = self
-            .client
-            .agent(&self.config.model)
-            .preamble(preamble)
-            .max_tokens(4096);
-
-        if self.config.disable_reasoning {
-            builder =
-                builder.additional_params(serde_json::json!({"thinking": {"type": "disabled"}}));
-        }
-
-        Ok(builder.build().prompt(context).await?)
-    }
-
-    fn estimate_tokens(&self, context: &str, input: &str) -> usize {
-        (context.chars().count() + input.chars().count()) / 3
-    }
 }
 
 #[async_trait]
@@ -379,23 +357,7 @@ where
         attachments: &[AttachmentInfo],
         tx: mpsc::Sender<StreamEvent>,
     ) -> Result<AgentResponse> {
-        let context = self.memory.get_context().await?;
-
-        let token_count = self.estimate_tokens(&context, user_input);
-        let limit = (self.config.context_limit as f32 * self.config.context_threshold) as usize;
-
-        if token_count > limit {
-            let _guard = self.compress_lock.lock().await;
-            let context = self.memory.get_context().await?;
-            let token_count = self.estimate_tokens(&context, user_input);
-            if token_count > limit {
-                info!("Context limit reached, compressing memory");
-                let summary = self.summarize_context(&context).await?;
-                self.memory.compress_memory(&summary).await?;
-            }
-        }
-
-        let context = self.memory.get_context().await?;
+        let context = self.memory.get_context(user_input).await?;
         let user_section = user_info.map(|u| u.format_for_prompt()).unwrap_or_default();
         let attachment_section = AttachmentInfo::format_for_prompt(attachments);
 
@@ -434,7 +396,8 @@ where
             })
             .await?;
 
-        self.memory.add_assistant_message(&response).await?;
+        let author = user_info.map(|u| u.name.as_str()).unwrap_or("User");
+        self.memory.add_turn(author, user_input, &response).await?;
         let files = pending_files.read().await.clone();
 
         Ok(AgentResponse {
@@ -446,7 +409,7 @@ where
 
 pub async fn create_agent(config: Config, memory: Arc<MemoryManager>) -> Result<Arc<dyn Agent>> {
     match config.api_provider.as_str() {
-        "openai" | "openai-compatible" => {
+        "openai" => {
             let client: openai::CompletionsClient = openai::CompletionsClient::builder()
                 .api_key(&config.api_key)
                 .base_url(&config.api_url)

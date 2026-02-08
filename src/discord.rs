@@ -1,7 +1,6 @@
 use crate::{
     agent::{Agent, AttachmentInfo, StreamEvent, UserInfo},
     config::Config,
-    memory::MemoryManager,
     scheduler::Scheduler,
     utils,
 };
@@ -26,13 +25,11 @@ const MAX_ATTACHMENT_SIZE: u32 = 25 * 1024 * 1024; // 25MB
 pub struct Bot {
     config: Config,
     agent: Arc<dyn Agent>,
-    memory: Arc<MemoryManager>,
     scheduler: Arc<Scheduler>,
 }
 
 struct Handler {
     agent: Arc<dyn Agent>,
-    memory: Arc<MemoryManager>,
     config: Config,
     bot_id: Arc<RwLock<Option<UserId>>>,
     owner_id: UserId,
@@ -208,23 +205,6 @@ impl EventHandler for Handler {
         let user_info = self.build_user_info(&ctx, &msg).await;
 
         let attachments = self.download_attachments(&msg).await;
-
-        let memory_content = if attachments.is_empty() {
-            content.clone()
-        } else {
-            let att_names: Vec<&str> = attachments.iter().map(|a| a.filename.as_str()).collect();
-            format!("{} [attachments: {}]", content, att_names.join(", "))
-        };
-
-        if let Err(e) = self
-            .memory
-            .add_message(&msg.author.name, &memory_content)
-            .await
-        {
-            error!("Failed to add message to memory: {}", e);
-            typing.stop();
-            return;
-        }
 
         let is_owner = msg.author.id == self.owner_id;
 
@@ -407,13 +387,11 @@ impl Bot {
     pub async fn new(
         config: Config,
         agent: Arc<dyn Agent>,
-        memory: Arc<MemoryManager>,
         scheduler: Arc<Scheduler>,
     ) -> Result<Self> {
         Ok(Self {
             config,
             agent,
-            memory,
             scheduler,
         })
     }
@@ -425,7 +403,6 @@ impl Bot {
 
         let handler = Handler {
             agent: self.agent,
-            memory: self.memory,
             config: self.config.clone(),
             bot_id: Arc::new(RwLock::new(None)),
             owner_id: UserId::new(self.config.owner_id),

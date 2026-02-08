@@ -30,3 +30,15 @@ iana-time-zone = "0.1.65"
 uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.13", features = ["json", "query"] }
 bollard = "0.20"
+
+lancedb = "0.26"
+fastembed = "5"
+arrow-array = "57"
+arrow-schema = "57"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"
+opt-level = "s"

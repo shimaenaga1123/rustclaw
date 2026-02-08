@@ -6,7 +6,10 @@ A lightweight, memory-aware Discord AI assistant powered by Anthropic-compatible
 
 - **Discord Integration**: Mention-based interaction
 - **Anthropic-compatible API**: Works with Claude, Minimax, and other Anthropic-compatible endpoints via [Rig](https://github.com/0xPlaygrounds/rig)
-- **Dual Memory System**: Automatic short-term/long-term memory with deduplication, auto-archiving, and size limits
+- **Vector Memory System**: LanceDB-powered semantic memory with local embeddings (multilingual-e5-small)
+    - **Important Facts**: Owner-managed persistent facts, always included in context
+    - **Conversation History**: Every turn stored with embeddings for semantic retrieval
+    - **Hybrid Context**: Recent 20 turns + top 10 semantically similar past conversations
 - **Tool Calling**: Shell command execution, web search, and memory operations
 - **Sandboxed Execution**: All commands run in isolated Debian Docker containers with Bun runtime
 - **Owner Permission System**: Owner/non-owner distinction with AI-level awareness for safe multi-user operation
@@ -57,6 +60,8 @@ docker pull oven/bun:debian  # optional, speeds up first run
 cargo run --release
 ```
 
+On first run, the embedding model (~130MB) will be downloaded from HuggingFace automatically.
+
 ## Installation (Linux Service)
 
 ```bash
@@ -106,6 +111,7 @@ RustClaw distinguishes between the **bot owner** and **regular users**. The AI m
 
 - Full administrative privileges
 - Can create, list, and **remove** scheduled tasks
+- Can **add**, **list**, and **delete** important memory entries
 - Can **reset** the Docker container
 - No output truncation
 
@@ -113,27 +119,50 @@ RustClaw distinguishes between the **bot owner** and **regular users**. The AI m
 
 - Output truncated to 4096 characters
 - Can create and list scheduled tasks, but **cannot remove** them
+- Can view important facts in context, but **cannot modify** them
 - AI refuses requests that could affect the host system, reveal internal configuration, or escalate privileges
 
 ## Memory System
 
-### Short-Term Memory
-- Stores recent conversation history (up to 200 messages)
-- Auto-archives overflow messages to `data/conversations/`
-- Auto-compresses at 80% of context limit via AI summarization
-- Saved to `data/recent.md`
+RustClaw uses a vector-based memory system powered by **LanceDB** and **fastembed** (multilingual-e5-small) for local, GPU-free semantic search.
 
-### Long-Term Memory
-- Extracted via AI summarization on context compression
-- Manually added via `remember` tool
-- Deduplication: identical or substantially similar entries are skipped (bidirectional substring matching)
-- Capped at 100 entries, oldest entries removed on overflow
-- Timestamped for traceability
-- Saved to `data/memory.md`
+### Important Facts (`important` table)
+- Owner-managed key facts (preferences, dates, decisions)
+- Always loaded in full into every conversation context
+- CRUD via `important_add`, `important_list`, `important_delete` tools (owner only)
+- Stored with vector embeddings for future extensibility
 
-### Archives
-- Compressed and overflowed conversations stored in `data/conversations/`
-- Named by timestamp: `20260206-143022.md`
+### Conversation History (`long_term_memory` table)
+- Every conversation turn (user input + assistant response) stored immediately
+- Each turn is embedded for semantic retrieval
+- No compression or summarization — original text preserved
+- Context includes:
+    - **Recent 20 turns**: maintains conversation flow and continuity
+    - **Semantic top 10**: past turns most relevant to the current input (deduplicated against recent)
+
+### How Context is Built
+
+```
+┌─────────────────────────────────┐
+│  # Important Facts              │  ← All entries, always
+│  - User prefers dark mode       │
+│  - Birthday is January 1st      │
+├─────────────────────────────────┤
+│  # Recent Conversations         │  ← Last 20 turns (chronological)
+│  User: ...                      │
+│  Assistant: ...                 │
+├─────────────────────────────────┤
+│  # Related Past Conversations   │  ← Top 10 semantic matches
+│  User: ...                      │     (excluding recent turns)
+│  Assistant: ...                 │
+└─────────────────────────────────┘
+```
+
+### Data Storage
+
+All data is stored in `data/lancedb/` using the Lance columnar format. No `.md` files, no plain-text archives.
+
+The embedding model is cached in `data/models/` after the initial download.
 
 ## Tools
 
@@ -165,13 +194,23 @@ Search the web using Brave API:
 @YourBot search for latest rust news
 ```
 
-### `remember`
-Save important information to long-term memory:
+### `important_add`
+Save important information to persistent memory (owner only):
 ```
 @YourBot remember my birthday is January 1st
 ```
 
-Duplicate entries are automatically detected and skipped.
+### `important_list`
+List all stored important facts:
+```
+@YourBot show all important facts
+```
+
+### `important_delete`
+Remove an important entry by ID (owner only):
+```
+@YourBot delete important entry abc123
+```
 
 ### `weather`
 Get current weather and forecast for any location:
@@ -241,16 +280,18 @@ rustclaw/
 │   ├── main.rs           # Entry point with graceful shutdown
 │   ├── config.rs         # Configuration
 │   ├── utils.rs          # Shared utilities (split_message, etc.)
+│   ├── embeddings.rs     # Local embedding service (fastembed, multilingual-e5-small)
+│   ├── vectordb.rs       # LanceDB wrapper (long_term_memory + important tables)
 │   ├── agent.rs          # AI agent + Rig integration + cached API client
 │   ├── tools/            # Tool implementations
 │   ├── discord.rs        # Discord event handler
-│   ├── memory.rs         # Memory management with dedup & auto-archive
+│   ├── memory.rs         # Memory manager (delegates to VectorDb)
 │   └── scheduler.rs      # Task scheduler
 └── data/
-    ├── recent.md         # Short-term memory (max 200 messages)
-    ├── memory.md         # Long-term memory (max 100 entries)
-    ├── schedules.json    # Scheduled tasks
-    └── conversations/    # Archives
+    ├── lancedb/          # Vector database (long_term_memory + important)
+    ├── models/           # Cached embedding model (~130MB)
+    ├── workspace/        # Docker sandbox mount
+    └── schedules.json    # Scheduled tasks
 ```
 
 ## Configuration
@@ -291,12 +332,13 @@ Keybindings: `c` check, `l` clippy, `t` test, `r` run, `d` doc
 
 ## Troubleshooting
 
-### Memory not persisting
+### Embedding model download fails
 
-Check that `DATA_DIR` is writable:
-```bash
-ls -la data/
-```
+The model is downloaded from HuggingFace on first run. Ensure network access to `huggingface.co`. The model is cached in `data/models/` — delete this directory to force re-download.
+
+### LanceDB errors
+
+If the database becomes corrupted, delete `data/lancedb/` to start fresh. All conversation history will be lost, but important facts can be re-added.
 
 ### Discord bot not responding
 
@@ -329,6 +371,8 @@ MIT License - see [LICENSE](LICENSE) for details
 - [NanoClaw](https://github.com/gavrielc/nanoclaw) - Original inspiration
 - [Rig](https://github.com/0xPlaygrounds/rig) - AI framework
 - [serenity](https://github.com/serenity-rs/serenity) - Discord library
+- [LanceDB](https://lancedb.com/) - Vector database
+- [fastembed](https://github.com/Anush008/fastembed-rs) - Local embedding inference
 
 ## Support
 

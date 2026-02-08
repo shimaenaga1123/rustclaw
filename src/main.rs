@@ -1,10 +1,12 @@
 mod agent;
 mod config;
 mod discord;
+mod embeddings;
 mod memory;
 mod scheduler;
 mod tools;
 mod utils;
+mod vectordb;
 
 use anyhow::Result;
 use tracing::{info, warn};
@@ -21,16 +23,20 @@ async fn main() -> Result<()> {
 
     let config = config::Config::load()?;
 
-    let memory_manager = memory::MemoryManager::new(&config.data_dir).await?;
+    let embedding_service = std::sync::Arc::new(
+        embeddings::EmbeddingService::new(&config.data_dir.join("models"))
+            .expect("Failed to initialize embedding model"),
+    );
+    let vectordb = vectordb::VectorDb::new(&config.data_dir, embedding_service.clone()).await?;
+    let memory_manager = memory::MemoryManager::new(vectordb.clone()).await?;
+
     let agent = agent::create_agent(config.clone(), memory_manager.clone()).await?;
 
     let scheduler = scheduler::Scheduler::new(&config.data_dir, agent.clone()).await?;
     agent.set_scheduler(scheduler.clone()).await;
     scheduler.start().await?;
 
-    let discord_bot =
-        discord::Bot::new(config, agent, memory_manager.clone(), scheduler.clone()).await?;
-
+    let discord_bot = discord::Bot::new(config, agent, scheduler.clone()).await?;
     let bot_handle = tokio::spawn(async move {
         if let Err(e) = discord_bot.start().await {
             tracing::error!("Discord bot error: {}", e);
@@ -39,10 +45,6 @@ async fn main() -> Result<()> {
 
     tokio::signal::ctrl_c().await?;
     info!("Shutdown signal received, saving state...");
-
-    if let Err(e) = memory_manager.flush().await {
-        warn!("Failed to flush memory on shutdown: {}", e);
-    }
 
     if let Err(e) = scheduler.shutdown().await {
         warn!("Failed to shutdown scheduler: {}", e);

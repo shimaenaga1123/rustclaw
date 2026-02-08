@@ -1,6 +1,6 @@
 mod error;
+mod important;
 mod list_schedules;
-mod remember;
 mod run_command;
 mod schedule;
 mod send_file;
@@ -9,8 +9,8 @@ mod unschedule;
 mod weather;
 mod web_search;
 
+pub use important::{ImportantAdd, ImportantDelete, ImportantList};
 pub use list_schedules::ListSchedules;
-pub use remember::Remember;
 pub use run_command::{ResetContainer, RunCommand};
 pub use schedule::Schedule;
 pub use send_file::SendFile;
