@@ -7,18 +7,19 @@ A lightweight, memory-aware Discord AI assistant powered by Anthropic-compatible
 - **Discord Integration**: Mention-based interaction
 - **Anthropic-compatible API**: Works with Claude, Minimax, and other Anthropic-compatible endpoints via [Rig](https://github.com/0xPlaygrounds/rig)
 - **Vector Memory System**: LanceDB-powered semantic memory with local embeddings (multilingual-e5-small)
-    - **Important Facts**: Owner-managed persistent facts, always included in context
-    - **Conversation History**: Every turn stored with embeddings for semantic retrieval
-    - **Hybrid Context**: Recent 20 turns + top 10 semantically similar past conversations
+  - **Important Facts**: Owner-managed persistent facts, always included in context
+  - **Conversation History**: Every turn stored with embeddings for semantic retrieval
+  - **Hybrid Context**: Recent 20 turns + top 10 semantically similar past conversations
 - **Tool Calling**: Shell command execution, web search, and memory operations
 - **Sandboxed Execution**: All commands run in isolated Debian Docker containers with Bun runtime
 - **Owner Permission System**: Owner/non-owner distinction with AI-level awareness for safe multi-user operation
 - **Brave Search**: Optional web search integration
 - **Task Scheduler**: Cron-based task scheduling with persistence
+- **Auto-Update**: Automatic version checking and updating via systemd timer
 
 ## Prerequisites
 
-- Rust 1.70+
+- Rust 1.70+ (for building from source)
 - Discord Bot Token
 - Anthropic-compatible API Key (Claude, Minimax, etc.)
 - Docker (required for all command execution)
@@ -26,19 +27,38 @@ A lightweight, memory-aware Discord AI assistant powered by Anthropic-compatible
 
 ## Quick Start
 
-### 1. Clone & Setup
+### Install from GitHub Releases (Recommended)
 
 ```bash
-git clone https://github.com/yourusername/rustclaw
-cd rustclaw
-cp config.example.toml config.toml
+curl -fsSL https://raw.githubusercontent.com/shimaenaga1123/rustclaw/main/install.sh | bash
 ```
 
-### 2. Configure
+This will:
+1. Download the latest release binary
+2. Install to `~/.local/share/rustclaw/`
+3. Set up systemd user service
+4. Enable daily auto-update checks
 
-Edit `config.toml` with your credentials. See `config.example.toml` for all options.
+After installation, edit the config:
 
-### 3. Create Discord Bot
+```bash
+nano ~/.local/share/rustclaw/config.toml
+systemctl --user start rustclaw
+```
+
+### Build from Source
+
+```bash
+git clone https://github.com/shimaenaga1123/rustclaw
+cd rustclaw
+cp config.example.toml config.toml
+# Edit config.toml with your credentials
+cargo run --release
+```
+
+On first run, the embedding model (~130MB) will be downloaded from HuggingFace automatically.
+
+### Create Discord Bot
 
 1. Go to [Discord Developer Portal](https://discord.com/developers/applications)
 2. Create New Application → Bot
@@ -46,7 +66,7 @@ Edit `config.toml` with your credentials. See `config.example.toml` for all opti
 4. Copy token to `config.toml`
 5. Invite bot with permissions: `View Channels`, `Send Messages`, `Read Message History`
 
-### 4. Prepare Docker
+### Prepare Docker
 
 Ensure Docker is running. The bot will automatically pull the `oven/bun:debian` image on first command execution.
 
@@ -54,39 +74,55 @@ Ensure Docker is running. The bot will automatically pull the `oven/bun:debian` 
 docker pull oven/bun:debian  # optional, speeds up first run
 ```
 
-### 5. Run
+## Service Management
 
 ```bash
-cargo run --release
-```
-
-On first run, the embedding model (~130MB) will be downloaded from HuggingFace automatically.
-
-## Installation (Linux Service)
-
-```bash
-./install.sh
-```
-
-Update (stops service, rebuilds, restarts):
-
-```bash
-./install.sh
-```
-
-Manage service:
-
-```bash
-systemctl --user start rustclaw
-systemctl --user stop rustclaw
-systemctl --user status rustclaw
-journalctl --user -u rustclaw -f
+systemctl --user start rustclaw      # Start
+systemctl --user stop rustclaw       # Stop
+systemctl --user restart rustclaw    # Restart
+systemctl --user status rustclaw     # Status
+journalctl --user -u rustclaw -f     # Logs
 ```
 
 Enable auto-start on boot:
 
 ```bash
 sudo loginctl enable-linger $USER
+```
+
+## Auto-Update
+
+RustClaw includes a systemd timer that automatically checks for new releases and updates the binary.
+
+### How It Works
+
+- `rustclaw-update.timer` runs daily at 04:00 (±30 min randomized delay)
+- Compares the installed version against the latest GitHub Release
+- If a new version is found: downloads, stops the service, replaces the binary, restarts
+
+### Managing Auto-Update
+
+```bash
+# Check timer status
+systemctl --user status rustclaw-update.timer
+
+# View update logs
+journalctl --user -u rustclaw-update
+
+# Trigger manual update
+systemctl --user start rustclaw-update
+
+# Disable auto-update
+systemctl --user disable --now rustclaw-update.timer
+
+# Re-enable auto-update
+systemctl --user enable --now rustclaw-update.timer
+```
+
+### Check Installed Version
+
+```bash
+cat ~/.local/share/rustclaw/version
 ```
 
 ## Usage
@@ -137,8 +173,8 @@ RustClaw uses a vector-based memory system powered by **LanceDB** and **fastembe
 - Each turn is embedded for semantic retrieval
 - No compression or summarization — original text preserved
 - Context includes:
-    - **Recent 20 turns**: maintains conversation flow and continuity
-    - **Semantic top 10**: past turns most relevant to the current input (deduplicated against recent)
+  - **Recent 20 turns**: maintains conversation flow and continuity
+  - **Semantic top 10**: past turns most relevant to the current input (deduplicated against recent)
 
 ### How Context is Built
 
@@ -298,6 +334,32 @@ rustclaw/
 
 See `config.example.toml` for all available options.
 
+## Releasing
+
+RustClaw uses [cargo-dist](https://github.com/axodotdev/cargo-dist) for release builds and [cargo-release](https://github.com/crate-ci/cargo-release) for version management.
+
+### Setup (One-time)
+
+```bash
+cargo install cargo-dist cargo-release
+cargo dist init   # Select: GitHub CI, x86_64-unknown-linux-gnu, shell installer
+```
+
+### Cutting a Release
+
+```bash
+cargo release patch --execute   # 0.2.0 → 0.2.1 (bumps, commits, tags, pushes)
+```
+
+This triggers GitHub Actions to build the binary and create a GitHub Release automatically. Servers with auto-update enabled will pick up the new version within 24 hours.
+
+### Verifying Before Release
+
+```bash
+cargo dist plan    # Preview what will be built
+cargo dist build   # Local test build
+```
+
 ## Development
 
 ### Build
@@ -340,6 +402,20 @@ The model is downloaded from HuggingFace on first run. Ensure network access to 
 
 If the database becomes corrupted, delete `data/lancedb/` to start fresh. All conversation history will be lost, but important facts can be re-added.
 
+### Auto-update not working
+
+```bash
+# Check timer is active
+systemctl --user list-timers | grep rustclaw
+
+# Run update manually and check output
+systemctl --user start rustclaw-update
+journalctl --user -u rustclaw-update --no-pager -n 20
+
+# Ensure GitHub API is reachable
+curl -fsSL https://api.github.com/repos/shimaenaga1123/rustclaw/releases/latest | grep tag_name
+```
+
 ### Discord bot not responding
 
 1. Check bot has "Message Content Intent" enabled
@@ -373,6 +449,7 @@ MIT License - see [LICENSE](LICENSE) for details
 - [serenity](https://github.com/serenity-rs/serenity) - Discord library
 - [LanceDB](https://lancedb.com/) - Vector database
 - [fastembed](https://github.com/Anush008/fastembed-rs) - Local embedding inference
+- [cargo-dist](https://github.com/axodotdev/cargo-dist) - Release automation
 
 ## Support
 
