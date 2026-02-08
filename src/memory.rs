@@ -3,7 +3,7 @@ use anyhow::Result;
 use std::sync::Arc;
 use tracing::info;
 
-const RECENT_TURN_COUNT: usize = 20;
+const RECENT_TURN_COUNT: usize = 5;
 const SEMANTIC_SEARCH_COUNT: usize = 10;
 
 pub struct MemoryManager {
