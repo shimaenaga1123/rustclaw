@@ -30,4 +30,4 @@ protobuf = '*'
 protoc = '*'
 
 [dist.github-custom-runners]
-global = "self-hosted"
+x86_64-unknown-linux-gnu = "ubuntu-24.04"
