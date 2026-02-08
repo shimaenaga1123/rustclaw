@@ -12,7 +12,7 @@ pub struct MemoryManager {
 
 impl MemoryManager {
     pub async fn new(vectordb: Arc<VectorDb>) -> Result<Arc<Self>> {
-        info!("MemoryManager initialized (LanceDB backend)");
+        info!("MemoryManager initialized (usearch + SQLite backend)");
         Ok(Arc::new(Self { vectordb }))
     }
 

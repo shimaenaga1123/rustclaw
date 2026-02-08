@@ -193,9 +193,9 @@ impl<C: CompletionClient> RigAgent<C> {
         // Memory
         preamble.push_str(
             "# Memory\n\
-         You have access to a vector-based memory system powered by LanceDB.\n\
+         You have access to a vector-based memory system powered by usearch.\n\
          - **Important Facts**: Key facts appear under '# Important Facts'. Use important_add to save new ones (owner only).\n\
-         - **Recent Conversations**: The last 20 conversation turns are included for continuity.\n\
+         - **Recent Conversations**: The last 5 conversation turns are included for continuity.\n\
          - **Related Past Conversations**: Semantically similar past conversations are automatically retrieved.\n\
          Use important_add proactively when the owner shares preferences, important dates, or key decisions.\n\n",
         );
