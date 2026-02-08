@@ -1,5 +1,5 @@
 use crate::{
-    agent::{AttachmentInfo, RigAgent, StreamEvent, UserInfo},
+    agent::{Agent, AttachmentInfo, StreamEvent, UserInfo},
     config::Config,
     memory::MemoryManager,
     scheduler::Scheduler,
@@ -25,13 +25,13 @@ const MAX_ATTACHMENT_SIZE: u32 = 25 * 1024 * 1024; // 25MB
 
 pub struct Bot {
     config: Config,
-    agent: Arc<RigAgent>,
+    agent: Arc<dyn Agent>,
     memory: Arc<MemoryManager>,
     scheduler: Arc<Scheduler>,
 }
 
 struct Handler {
-    agent: Arc<RigAgent>,
+    agent: Arc<dyn Agent>,
     memory: Arc<MemoryManager>,
     config: Config,
     bot_id: Arc<RwLock<Option<UserId>>>,
@@ -406,7 +406,7 @@ impl EventHandler for Handler {
 impl Bot {
     pub async fn new(
         config: Config,
-        agent: Arc<RigAgent>,
+        agent: Arc<dyn Agent>,
         memory: Arc<MemoryManager>,
         scheduler: Arc<Scheduler>,
     ) -> Result<Self> {

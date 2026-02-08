@@ -22,7 +22,7 @@ async fn main() -> Result<()> {
     let config = config::Config::load()?;
 
     let memory_manager = memory::MemoryManager::new(&config.data_dir).await?;
-    let agent = agent::RigAgent::new(config.clone(), memory_manager.clone()).await?;
+    let agent = agent::create_agent(config.clone(), memory_manager.clone()).await?;
 
     let scheduler = scheduler::Scheduler::new(&config.data_dir, agent.clone()).await?;
     agent.set_scheduler(scheduler.clone()).await;

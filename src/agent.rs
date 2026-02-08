@@ -1,5 +1,6 @@
 use crate::{config::Config, memory::MemoryManager, scheduler::Scheduler};
 use anyhow::Result;
+use async_trait::async_trait;
 use futures_util::StreamExt;
 use rig::{
     agent::MultiTurnStreamItem,
@@ -93,12 +94,6 @@ impl AttachmentInfo {
     }
 }
 
-enum ApiClient {
-    Anthropic(anthropic::Client),
-    OpenAi(openai::CompletionsClient),
-    Gemini(gemini::Client),
-}
-
 struct StreamParams<'a> {
     model: &'a str,
     preamble: &'a str,
@@ -113,287 +108,31 @@ struct StreamParams<'a> {
     tx: mpsc::Sender<StreamEvent>,
 }
 
-impl ApiClient {
-    async fn prompt(
+#[async_trait]
+pub trait Agent: Send + Sync {
+    async fn set_scheduler(&self, scheduler: Arc<Scheduler>);
+
+    async fn process_streaming(
         &self,
-        model: &str,
-        preamble: &str,
-        prompt: &str,
-        disable_reasoning: bool,
-    ) -> Result<String> {
-        match self {
-            ApiClient::OpenAi(client) => {
-                let builder = client.agent(model).preamble(preamble).max_tokens(4096);
-                let builder = if disable_reasoning {
-                    builder.additional_params(serde_json::json!({"thinking": {"type": "disabled"}}))
-                } else {
-                    builder
-                };
-                Ok(builder.build().prompt(prompt).await?)
-            }
-            ApiClient::Gemini(client) => {
-                let builder = client.agent(model).preamble(preamble).max_tokens(4096);
-                let builder = if disable_reasoning {
-                    builder.additional_params(serde_json::json!({"thinking": {"type": "disabled"}}))
-                } else {
-                    builder
-                };
-                Ok(builder.build().prompt(prompt).await?)
-            }
-            ApiClient::Anthropic(client) => {
-                let builder = client.agent(model).preamble(preamble).max_tokens(4096);
-                let builder = if disable_reasoning {
-                    builder.additional_params(serde_json::json!({"thinking": {"type": "disabled"}}))
-                } else {
-                    builder
-                };
-                Ok(builder.build().prompt(prompt).await?)
-            }
-        }
-    }
-
-    async fn stream_prompt(&self, params: StreamParams<'_>) -> Result<String> {
-        let run_command = super::tools::RunCommand {
-            config: params.config.clone(),
-            is_owner: params.is_owner,
-        };
-        let remember = super::tools::Remember {
-            memory: params.memory.clone(),
-        };
-        let send_file = super::tools::SendFile {
-            pending_files: params.pending_files.clone(),
-            config: params.config.clone(),
-        };
-        let send_markdown_table = super::tools::SendMarkdownTable {
-            pending_files: params.pending_files.clone(),
-            config: params.config.clone(),
-        };
-        let weather = super::tools::Weather {
-            client: reqwest::Client::new(),
-        };
-
-        match self {
-            ApiClient::OpenAi(client) => {
-                let builder = client
-                    .agent(params.model)
-                    .preamble(params.preamble)
-                    .max_tokens(4096);
-                let builder = if params.disable_reasoning {
-                    builder.additional_params(serde_json::json!({"thinking": {"type": "disabled"}}))
-                } else {
-                    builder
-                };
-                let mut builder = builder
-                    .tool(run_command)
-                    .tool(remember)
-                    .tool(send_file)
-                    .tool(send_markdown_table.clone())
-                    .tool(weather);
-
-                if params.is_owner {
-                    builder = builder.tool(super::tools::ResetContainer {
-                        config: params.config.clone(),
-                    });
-                }
-                if params.config.brave_api_key.is_some() {
-                    builder = builder.tool(super::tools::WebSearch {
-                        config: params.config.clone(),
-                        client: reqwest::Client::new(),
-                    });
-                }
-                if let Some(ref scheduler) = params.scheduler {
-                    builder = builder
-                        .tool(super::tools::Schedule {
-                            scheduler: scheduler.clone(),
-                            is_owner: params.is_owner,
-                            discord_channel_id: params.discord_channel_id,
-                        })
-                        .tool(super::tools::Unschedule {
-                            scheduler: scheduler.clone(),
-                            is_owner: params.is_owner,
-                        })
-                        .tool(super::tools::ListSchedules {
-                            scheduler: scheduler.clone(),
-                        });
-                }
-
-                Self::run_stream(
-                    builder.default_max_turns(50).build(),
-                    params.prompt,
-                    params.tx,
-                )
-                .await
-            }
-            ApiClient::Gemini(client) => {
-                let builder = client
-                    .agent(params.model)
-                    .preamble(params.preamble)
-                    .max_tokens(4096);
-                let builder = if params.disable_reasoning {
-                    builder.additional_params(serde_json::json!({"thinking": {"type": "disabled"}}))
-                } else {
-                    builder
-                };
-                let mut builder = builder
-                    .tool(run_command)
-                    .tool(remember)
-                    .tool(send_file)
-                    .tool(send_markdown_table.clone())
-                    .tool(weather);
-
-                if params.is_owner {
-                    builder = builder.tool(super::tools::ResetContainer {
-                        config: params.config.clone(),
-                    });
-                }
-                if params.config.brave_api_key.is_some() {
-                    builder = builder.tool(super::tools::WebSearch {
-                        config: params.config.clone(),
-                        client: reqwest::Client::new(),
-                    });
-                }
-                if let Some(ref scheduler) = params.scheduler {
-                    builder = builder
-                        .tool(super::tools::Schedule {
-                            scheduler: scheduler.clone(),
-                            is_owner: params.is_owner,
-                            discord_channel_id: params.discord_channel_id,
-                        })
-                        .tool(super::tools::Unschedule {
-                            scheduler: scheduler.clone(),
-                            is_owner: params.is_owner,
-                        })
-                        .tool(super::tools::ListSchedules {
-                            scheduler: scheduler.clone(),
-                        });
-                }
-
-                Self::run_stream(
-                    builder.default_max_turns(50).build(),
-                    params.prompt,
-                    params.tx,
-                )
-                .await
-            }
-            ApiClient::Anthropic(client) => {
-                let builder = client
-                    .agent(params.model)
-                    .preamble(params.preamble)
-                    .max_tokens(4096);
-                let builder = if params.disable_reasoning {
-                    builder.additional_params(serde_json::json!({"thinking": {"type": "disabled"}}))
-                } else {
-                    builder
-                };
-                let mut builder = builder
-                    .tool(run_command)
-                    .tool(remember)
-                    .tool(send_file)
-                    .tool(send_markdown_table)
-                    .tool(weather);
-
-                if params.is_owner {
-                    builder = builder.tool(super::tools::ResetContainer {
-                        config: params.config.clone(),
-                    });
-                }
-                if params.config.brave_api_key.is_some() {
-                    builder = builder.tool(super::tools::WebSearch {
-                        config: params.config.clone(),
-                        client: reqwest::Client::new(),
-                    });
-                }
-                if let Some(ref scheduler) = params.scheduler {
-                    builder = builder
-                        .tool(super::tools::Schedule {
-                            scheduler: scheduler.clone(),
-                            is_owner: params.is_owner,
-                            discord_channel_id: params.discord_channel_id,
-                        })
-                        .tool(super::tools::Unschedule {
-                            scheduler: scheduler.clone(),
-                            is_owner: params.is_owner,
-                        })
-                        .tool(super::tools::ListSchedules {
-                            scheduler: scheduler.clone(),
-                        });
-                }
-
-                Self::run_stream(
-                    builder.default_max_turns(50).build(),
-                    params.prompt,
-                    params.tx,
-                )
-                .await
-            }
-        }
-    }
-
-    async fn run_stream<M, R, A>(
-        agent: A,
-        prompt: &str,
+        user_input: &str,
+        is_owner: bool,
+        discord_channel_id: Option<u64>,
+        user_info: Option<&UserInfo>,
+        attachments: &[AttachmentInfo],
         tx: mpsc::Sender<StreamEvent>,
-    ) -> Result<String>
-    where
-        M: CompletionModel + 'static,
-        R: Clone + Unpin + GetTokenUsage,
-        A: StreamingPrompt<M, R>,
-    {
-        let mut stream = agent.stream_prompt(prompt).await;
-        let mut response_text = String::new();
-
-        while let Some(item) = stream.next().await {
-            match item {
-                Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(
-                    text,
-                ))) => {
-                    let _ = tx.send(StreamEvent::TextDelta(text.text.clone())).await;
-                    response_text.push_str(&text.text);
-                }
-                Ok(MultiTurnStreamItem::FinalResponse(res)) => {
-                    if response_text.is_empty() {
-                        response_text = res.response().to_string();
-                    }
-                }
-                Err(e) => {
-                    let _ = tx.send(StreamEvent::Error(e.to_string())).await;
-                    return Err(anyhow::anyhow!("{}", e));
-                }
-                _ => {}
-            }
-        }
-
-        let _ = tx.send(StreamEvent::Done).await;
-        Ok(response_text)
-    }
+    ) -> Result<AgentResponse>;
 }
 
-pub struct RigAgent {
+pub struct RigAgent<C: CompletionClient> {
     config: Config,
     memory: Arc<MemoryManager>,
     scheduler: RwLock<Option<Arc<Scheduler>>>,
-    client: ApiClient,
+    client: C,
     compress_lock: Mutex<()>,
 }
 
-impl RigAgent {
-    pub async fn new(config: Config, memory: Arc<MemoryManager>) -> Result<Arc<Self>> {
-        let client = match config.api_provider.as_str() {
-            "openai" | "openai-compatible" => ApiClient::OpenAi(
-                openai::CompletionsClient::builder()
-                    .api_key(&config.api_key)
-                    .base_url(&config.api_url)
-                    .build()?,
-            ),
-            "gemini" => ApiClient::Gemini(gemini::Client::new(&config.api_key)?),
-            _ => ApiClient::Anthropic(
-                anthropic::Client::builder()
-                    .api_key(&config.api_key)
-                    .base_url(&config.api_url)
-                    .build()?,
-            ),
-        };
-
+impl<C: CompletionClient> RigAgent<C> {
+    pub async fn new(config: Config, memory: Arc<MemoryManager>, client: C) -> Result<Arc<Self>> {
         Ok(Arc::new(Self {
             config,
             memory,
@@ -401,10 +140,6 @@ impl RigAgent {
             client,
             compress_lock: Mutex::new(()),
         }))
-    }
-
-    pub async fn set_scheduler(&self, scheduler: Arc<Scheduler>) {
-        *self.scheduler.write().await = Some(scheduler);
     }
 
     fn build_preamble(&self, is_owner: bool) -> String {
@@ -488,7 +223,154 @@ impl RigAgent {
         preamble
     }
 
-    pub async fn process_streaming(
+    async fn stream_prompt(&self, params: StreamParams<'_>) -> Result<String>
+    where
+        <C as CompletionClient>::CompletionModel: 'static,
+    {
+        let run_command = super::tools::RunCommand {
+            config: params.config.clone(),
+            is_owner: params.is_owner,
+        };
+        let remember = super::tools::Remember {
+            memory: params.memory.clone(),
+        };
+        let send_file = super::tools::SendFile {
+            pending_files: params.pending_files.clone(),
+            config: params.config.clone(),
+        };
+        let send_markdown_table = super::tools::SendMarkdownTable {
+            pending_files: params.pending_files.clone(),
+            config: params.config.clone(),
+        };
+        let weather = super::tools::Weather {
+            client: reqwest::Client::new(),
+        };
+
+        let mut builder = self
+            .client
+            .agent(params.model)
+            .preamble(params.preamble)
+            .max_tokens(4096)
+            .tool(run_command)
+            .tool(remember)
+            .tool(send_file)
+            .tool(send_markdown_table)
+            .tool(weather);
+
+        if params.disable_reasoning {
+            builder =
+                builder.additional_params(serde_json::json!({"thinking": {"type": "disabled"}}));
+        }
+
+        if params.is_owner {
+            builder = builder.tool(super::tools::ResetContainer {
+                config: params.config.clone(),
+            });
+        }
+
+        if params.config.brave_api_key.is_some() {
+            builder = builder.tool(super::tools::WebSearch {
+                config: params.config.clone(),
+                client: reqwest::Client::new(),
+            });
+        }
+
+        if let Some(ref scheduler) = params.scheduler {
+            builder = builder
+                .tool(super::tools::Schedule {
+                    scheduler: scheduler.clone(),
+                    is_owner: params.is_owner,
+                    discord_channel_id: params.discord_channel_id,
+                })
+                .tool(super::tools::Unschedule {
+                    scheduler: scheduler.clone(),
+                    is_owner: params.is_owner,
+                })
+                .tool(super::tools::ListSchedules {
+                    scheduler: scheduler.clone(),
+                });
+        }
+
+        Self::run_stream(
+            builder.default_max_turns(50).build(),
+            params.prompt,
+            params.tx,
+        )
+        .await
+    }
+
+    async fn run_stream<M, R, A>(
+        agent: A,
+        prompt: &str,
+        tx: mpsc::Sender<StreamEvent>,
+    ) -> Result<String>
+    where
+        M: CompletionModel + 'static,
+        R: Clone + Unpin + GetTokenUsage,
+        A: StreamingPrompt<M, R>,
+    {
+        let mut stream = agent.stream_prompt(prompt).await;
+        let mut response_text = String::new();
+
+        while let Some(item) = stream.next().await {
+            match item {
+                Ok(MultiTurnStreamItem::StreamAssistantItem(StreamedAssistantContent::Text(
+                    text,
+                ))) => {
+                    let _ = tx.send(StreamEvent::TextDelta(text.text.clone())).await;
+                    response_text.push_str(&text.text);
+                }
+                Ok(MultiTurnStreamItem::FinalResponse(res)) => {
+                    if response_text.is_empty() {
+                        response_text = res.response().to_string();
+                    }
+                }
+                Err(e) => {
+                    let _ = tx.send(StreamEvent::Error(e.to_string())).await;
+                    return Err(anyhow::anyhow!("{}", e));
+                }
+                _ => {}
+            }
+        }
+
+        let _ = tx.send(StreamEvent::Done).await;
+        Ok(response_text)
+    }
+
+    async fn summarize_context(&self, context: &str) -> Result<String> {
+        let preamble = "Summarize only the key points of the conversation. \
+                        Be concise but preserve important facts, user preferences, and decisions made.";
+
+        let mut builder = self
+            .client
+            .agent(&self.config.model)
+            .preamble(preamble)
+            .max_tokens(4096);
+
+        if self.config.disable_reasoning {
+            builder =
+                builder.additional_params(serde_json::json!({"thinking": {"type": "disabled"}}));
+        }
+
+        Ok(builder.build().prompt(context).await?)
+    }
+
+    fn estimate_tokens(&self, context: &str, input: &str) -> usize {
+        (context.chars().count() + input.chars().count()) / 3
+    }
+}
+
+#[async_trait]
+impl<C> Agent for RigAgent<C>
+where
+    C: CompletionClient + Send + Sync,
+    C::CompletionModel: 'static,
+{
+    async fn set_scheduler(&self, scheduler: Arc<Scheduler>) {
+        *self.scheduler.write().await = Some(scheduler);
+    }
+
+    async fn process_streaming(
         &self,
         user_input: &str,
         is_owner: bool,
@@ -537,7 +419,6 @@ impl RigAgent {
         let scheduler_ref = self.scheduler.read().await.clone();
 
         let response = self
-            .client
             .stream_prompt(StreamParams {
                 model: &self.config.model,
                 preamble: &preamble,
@@ -561,22 +442,30 @@ impl RigAgent {
             files,
         })
     }
+}
 
-    async fn summarize_context(&self, context: &str) -> Result<String> {
-        let preamble = "Summarize only the key points of the conversation. \
-                        Be concise but preserve important facts, user preferences, and decisions made.";
-
-        self.client
-            .prompt(
-                &self.config.model,
-                preamble,
-                context,
-                self.config.disable_reasoning,
-            )
-            .await
-    }
-
-    fn estimate_tokens(&self, context: &str, input: &str) -> usize {
-        (context.chars().count() + input.chars().count()) / 3
+pub async fn create_agent(config: Config, memory: Arc<MemoryManager>) -> Result<Arc<dyn Agent>> {
+    match config.api_provider.as_str() {
+        "openai" | "openai-compatible" => {
+            let client: openai::CompletionsClient = openai::CompletionsClient::builder()
+                .api_key(&config.api_key)
+                .base_url(&config.api_url)
+                .build()?;
+            let agent = RigAgent::new(config, memory, client).await?;
+            Ok(agent as Arc<dyn Agent>)
+        }
+        "gemini" => {
+            let client = gemini::Client::new(&config.api_key)?;
+            let agent = RigAgent::new(config, memory, client).await?;
+            Ok(agent as Arc<dyn Agent>)
+        }
+        _ => {
+            let client: anthropic::Client = anthropic::Client::builder()
+                .api_key(&config.api_key)
+                .base_url(&config.api_url)
+                .build()?;
+            let agent = RigAgent::new(config, memory, client).await?;
+            Ok(agent as Arc<dyn Agent>)
+        }
     }
 }

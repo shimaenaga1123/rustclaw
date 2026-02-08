@@ -1,4 +1,4 @@
-use crate::agent::RigAgent;
+use crate::agent::Agent;
 use crate::utils;
 use anyhow::Result;
 use chrono_tz::Tz;
@@ -29,7 +29,7 @@ pub struct ScheduledTask {
 }
 
 pub struct Scheduler {
-    agent: Arc<RigAgent>,
+    agent: Arc<dyn Agent>,
     scheduler: Mutex<JobScheduler>,
     tasks: Arc<RwLock<HashMap<String, ScheduledTask>>>,
     job_ids: Arc<RwLock<HashMap<String, uuid::Uuid>>>,
@@ -47,7 +47,7 @@ impl Scheduler {
         }
     }
 
-    pub async fn new(data_dir: &PathBuf, agent: Arc<RigAgent>) -> Result<Arc<Self>> {
+    pub async fn new(data_dir: &PathBuf, agent: Arc<dyn Agent>) -> Result<Arc<Self>> {
         let scheduler = JobScheduler::new().await?;
         let data_path = data_dir.join("schedules.json");
 
