@@ -181,7 +181,7 @@ EOF
     echo ""
     echo "Auto-update: daily at 04:00"
     echo "  launchctl kickstart gui/${UID_NUM}/${UPDATE_LABEL}      # Manual update"
-fi
+}
 
 mkdir -p "$INSTALL_DIR/data"
 
