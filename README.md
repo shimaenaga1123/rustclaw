@@ -29,23 +29,21 @@ A lightweight, memory-aware Discord AI assistant powered by Anthropic-compatible
 
 ## Quick Start
 
-### Install from GitHub Releases (Recommended)
+### Install Binary (Recommended)
 
-Supports **Linux** (x86_64) and **macOS** (Apple Silicon). The installer auto-detects your platform.
-
+Supports **Linux** (x86_64) and **macOS** (Apple Silicon).
 ```bash
-curl -fsSL https://raw.githubusercontent.com/shimaenaga1123/rustclaw/main/install.sh | bash
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/shimaenaga1123/rustclaw/releases/latest/download/rustclaw-installer.sh | sh
 ```
 
-This will:
-1. Detect OS and architecture automatically
-2. Download the correct binary from the latest release
-3. Install to `~/.local/share/rustclaw/`
-4. Set up a background service (systemd on Linux, launchd on macOS)
-5. Enable daily auto-update checks
+### Setup Background Service
 
-After installation, edit the config and start:
+After installing the binary, set up a background service and auto-updater:
+```bash
+curl -fsSL https://raw.githubusercontent.com/shimaenaga1123/rustclaw/main/setup-service.sh | bash
+```
 
+Then edit the config and start:
 ```bash
 nano ~/.local/share/rustclaw/config.toml
 
@@ -57,7 +55,6 @@ launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.rustclaw.bot.plist
 ```
 
 ### Build from Source
-
 ```bash
 git clone https://github.com/shimaenaga1123/rustclaw
 cd rustclaw
