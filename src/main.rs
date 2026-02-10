@@ -54,9 +54,9 @@ async fn main() -> Result<()> {
     agent.set_scheduler(scheduler.clone()).await;
     scheduler.start().await?;
 
-    let scheduler_ref = scheduler.clone();
+    let discord_bot = discord::Bot::new(config, agent, scheduler.clone()).await?;
     let bot_handle = tokio::spawn(async move {
-        if let Err(e) = discord::setup(config, agent, scheduler_ref).await {
+        if let Err(e) = discord_bot.start().await {
             tracing::error!("Discord bot error: {}", e);
         }
     });

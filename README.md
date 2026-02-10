@@ -4,7 +4,7 @@ A lightweight, memory-aware Discord AI assistant powered by Anthropic-compatible
 
 ## Features
 
-- **Discord Integration**: Slash command (`/ask`) interaction
+- **Discord Integration**: Mention-based interaction
 - **Anthropic-compatible API**: Works with Claude, Minimax, and other Anthropic-compatible endpoints via [Rig](https://github.com/0xPlaygrounds/rig)
 - **Pluggable Embedding System**: Choose between local or API-based embeddings
   - **Local**: fastembed (multilingual-e5-small, 384d) — no API dependency, GPU-free
@@ -104,16 +104,16 @@ cat ~/.local/share/rustclaw/version
 
 ## Usage
 
-Use the `/ask` slash command to interact with the bot:
+Mention the bot to interact with the bot:
 
 ```
-/ask prompt:What's the weather like today?
+@Bot What's the weather like today?
 
-/ask prompt:search for rust async programming
+@Bot search for rust async programming
 
-/ask prompt:run ls -la
+@Bot run ls -la
 
-/ask prompt:remember that I prefer dark mode
+@Bot remember that I prefer dark mode
 ```
 
 You can also attach files using the optional `file` parameter.
@@ -234,7 +234,7 @@ The bot has access to these tools:
 ### `run_command`
 Execute shell commands in an isolated Debian Docker container with Bun runtime:
 ```
-/ask prompt:run bun --version
+@Bot run bun --version
 ```
 
 - All users' commands run inside `oven/bun:debian` containers
@@ -244,7 +244,7 @@ Execute shell commands in an isolated Debian Docker container with Bun runtime:
 ### `reset_container`
 Reset the Docker sandbox container (owner only):
 ```
-/ask prompt:reset the container
+@Bot reset the container
 ```
 
 - Stops and removes the current container
@@ -254,15 +254,15 @@ Reset the Docker sandbox container (owner only):
 ### `web_search`
 Search the web using Brave API:
 ```
-/ask prompt:search for latest rust news
+@Bot search for latest rust news
 ```
 
 ### `typst_render`
 Render Typst markup as a PNG image and send as a Discord attachment:
 ```
-/ask prompt:render this table: | Name | Score | | Alice | 95 |
+@Bot render this table: | Name | Score | | Alice | 95 |
 
-/ask prompt:render the equation x^2 + y^2 = z^2
+@Bot render the equation x^2 + y^2 = z^2
 ```
 
 - Tables, math equations, and formatted documents
@@ -272,7 +272,7 @@ Render Typst markup as a PNG image and send as a Discord attachment:
 ### `search_memory`
 Search past conversations semantically:
 ```
-/ask prompt:search memory for our discussion about database migration
+@Bot search memory for our discussion about database migration
 ```
 
 - Returns the most relevant past conversation turns
@@ -281,49 +281,49 @@ Search past conversations semantically:
 ### `important_add`
 Save important information to persistent memory (owner only):
 ```
-/ask prompt:remember my birthday is January 1st
+@Bot remember my birthday is January 1st
 ```
 
 ### `important_list`
 List all stored important facts:
 ```
-/ask prompt:show all important facts
+@Bot show all important facts
 ```
 
 ### `important_delete`
 Remove an important entry by ID (owner only):
 ```
-/ask prompt:delete important entry abc123
+@Bot delete important entry abc123
 ```
 
 ### `weather`
 Get current weather and forecast for any location:
 ```
-/ask prompt:what's the weather in Seoul?
+@Bot what's the weather in Seoul?
 ```
 
 ### `send_file`
 Send files from the Docker workspace as Discord attachments:
 ```
-/ask prompt:create a script and send it to me
+@Bot create a script and send it to me
 ```
 
 ### `schedule`
 Schedule recurring tasks with cron expressions:
 ```
-/ask prompt:schedule a daily weather check at 9am
+@Bot schedule a daily weather check at 9am
 ```
 
 ### `list_schedules`
 List all scheduled tasks:
 ```
-/ask prompt:show my scheduled tasks
+@Bot show my scheduled tasks
 ```
 
 ### `unschedule`
 Remove a scheduled task (owner only):
 ```
-/ask prompt:remove schedule abc123
+@Bot remove schedule abc123
 ```
 
 Non-owner users will receive a permission denied error.
@@ -368,7 +368,7 @@ rustclaw/
 │   ├── vectordb.rs       # usearch (F16) + SQLite wrapper (conversations + important)
 │   ├── agent.rs          # AI agent + Rig integration
 │   ├── tools/            # Tool implementations
-│   ├── discord.rs        # Discord event handler (/ask slash command)
+│   ├── discord.rs        # Discord event handler
 │   ├── memory.rs         # Memory manager (delegates to VectorDb)
 │   └── scheduler.rs      # Task scheduler
 └── data/
