@@ -25,8 +25,10 @@ async fn main() -> Result<()> {
 
     let embedding_service = std::sync::Arc::new(
         embeddings::EmbeddingService::new(&config.data_dir.join("models"))
-            .expect("Failed to initialize embedding model"),
+            .expect("Failed to initialize embedding service"),
     );
+    embedding_service.start_unload_timer();
+
     let vectordb = vectordb::VectorDb::new(&config.data_dir, embedding_service.clone()).await?;
     let memory_manager = memory::MemoryManager::new(vectordb.clone()).await?;
 

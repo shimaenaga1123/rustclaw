@@ -40,7 +40,7 @@ impl VectorDb {
         let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
 
         let pool = SqlitePoolOptions::new()
-            .max_connections(5)
+            .max_connections(2)
             .connect(&db_url)
             .await
             .context("Failed to connect to SQLite")?;
@@ -84,7 +84,7 @@ impl VectorDb {
                 .context("Failed to load usearch index")?;
             info!("Loaded usearch index ({} vectors)", index.size());
         } else {
-            index.reserve(10000).context("Failed to reserve index")?;
+            index.reserve(1000).context("Failed to reserve index")?;
         }
 
         let instance = Arc::new(Self {
@@ -131,7 +131,7 @@ impl VectorDb {
         tokio::task::spawn_blocking(move || -> Result<()> {
             let idx = index.lock().unwrap();
             if idx.size() + 1 >= idx.capacity() {
-                idx.reserve(idx.capacity() + 10000)
+                idx.reserve(idx.capacity() + 1000)
                     .map_err(|e| anyhow::anyhow!("{}", e))?;
             }
             idx.add(rowid, &embedding)
