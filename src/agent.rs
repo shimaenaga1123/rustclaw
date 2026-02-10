@@ -284,16 +284,16 @@ impl<C: CompletionClient> RigAgent<C> {
 
         if let Some(ref scheduler) = params.scheduler {
             builder = builder
-                .tool(super::tools::Schedule {
+                .tool(super::tools::ScheduleAdd {
                     scheduler: scheduler.clone(),
                     is_owner: params.is_owner,
                     discord_channel_id: params.discord_channel_id,
                 })
-                .tool(super::tools::Unschedule {
+                .tool(super::tools::ScheduleDelete {
                     scheduler: scheduler.clone(),
                     is_owner: params.is_owner,
                 })
-                .tool(super::tools::ListSchedules {
+                .tool(super::tools::ScheduleList {
                     scheduler: scheduler.clone(),
                 });
         }
