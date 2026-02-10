@@ -35,10 +35,12 @@ iana-time-zone = "0.1.65"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "gzip", "brotli"] }
 bollard = "0.20"
 
-fastembed = { version = "5", default-features = false, features = ["hf-hub", "ort-download-binaries"] }
 usearch = "2"
 
 sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros"] }
+
+[target.'cfg(not(windows))'.dependencies]
+fastembed = { version = "5", default-features = false, features = ["hf-hub", "ort-download-binaries"] }
 
 [profile.release]
 strip = true

@@ -26,24 +26,7 @@ async fn main() -> Result<()> {
 
     let config = config::Config::load()?;
 
-    let embedding_service: Arc<dyn EmbeddingService> = match config.embedding_provider.as_str() {
-        "gemini" => {
-            let api_key = config
-                .embedding_api_key
-                .as_deref()
-                .unwrap_or(&config.api_key);
-            Arc::new(embeddings::GeminiEmbedding::new(
-                api_key,
-                config.embedding_model.as_deref(),
-                config.embedding_dimensions,
-            ))
-        }
-        _ => {
-            let local = embeddings::LocalEmbedding::new(&config.data_dir.join("models"))?;
-            local.start_unload_timer();
-            Arc::new(local)
-        }
-    };
+    let embedding_service = embeddings::create_embedding_service(config.clone()).await?;
 
     let vectordb = vectordb::VectorDb::new(&config.data_dir, embedding_service).await?;
     let memory_manager = memory::MemoryManager::new(vectordb.clone()).await?;
