@@ -18,7 +18,6 @@ const EDIT_INTERVAL_MS: u64 = 1200;
 pub struct Data {
     pub agent: Arc<dyn Agent>,
     pub config: Config,
-    pub scheduler: Arc<Scheduler>,
     pub owner_id: UserId,
     pub http_client: reqwest::Client,
 }
@@ -303,7 +302,6 @@ pub async fn setup(config: Config, agent: Arc<dyn Agent>, scheduler: Arc<Schedul
                 Ok(Data {
                     agent,
                     config,
-                    scheduler,
                     owner_id,
                     http_client: reqwest::Client::new(),
                 })

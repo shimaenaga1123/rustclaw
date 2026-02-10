@@ -4,12 +4,11 @@ version = "1.2.0"
 edition = "2024"
 repository = "https://github.com/shimaenaga1123/rustclaw"
 homepage = "https://github.com/shimaenaga1123/rustclaw"
-description = "A lightweight, memory-aware Discord AI assistant powered by Anthropic-compatible APIs, implemented in Rust. Inspired by nanoclaw and OpenClaw"
+description = "A lightweight, memory-aware Discord AI assistant powered by Anthropic-compatible APIs, implemented in Rust."
 license = "MIT"
 
 [dependencies]
 poise = "0.6"
-
 rig-core = "0.30"
 
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "sync", "time", "signal"] }
@@ -26,24 +25,25 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 anyhow = "1"
 thiserror = "2"
+uuid = { version = "1", features = ["v4", "fast-rng"] }
 
-chrono = "0.4"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 chrono-tz = "0.10.4"
 iana-time-zone = "0.1.65"
 
-uuid = { version = "1", features = ["v4"] }
-reqwest = { version = "0.12", features = ["rustls-tls", "json"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "gzip", "brotli"] }
 bollard = "0.20"
 
-fastembed = "5"
+fastembed = { version = "5", default-features = false, features = ["hf-hub", "ort-download-binaries"] }
 usearch = "2"
-sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
+
+sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "sqlite", "macros"] }
 
 [profile.release]
 strip = true
 lto = "thin"
 panic = "abort"
-opt-level = "s"
+opt-level = 3
 
 [profile.dist]
 inherits = "release"
