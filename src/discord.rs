@@ -354,6 +354,20 @@ impl EventHandler for Handler {
                         error!("Failed to clean up temp file: {}", e);
                     }
                 }
+                let notify = msg
+                    .channel_id
+                    .say(&ctx.http, format!("<@{}>", msg.author.id))
+                    .await;
+                if let Ok(notify_msg) = notify {
+                    tokio::spawn({
+                        let http = ctx.http.clone();
+                        let channel_id = msg.channel_id;
+                        async move {
+                            tokio::time::sleep(Duration::from_secs(2)).await;
+                            let _ = channel_id.delete_message(&http, notify_msg.id).await;
+                        }
+                    });
+                }
             }
             Ok(Err(e)) => {
                 error!("Agent error: {}", e);
