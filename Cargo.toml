@@ -34,10 +34,6 @@ iana-time-zone = "0.1.65"
 uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.12", features = ["rustls-tls", "json"] }
 bollard = "0.20"
-typst = "0.14"
-typst-render = "0.14"
-typst-assets = { version = "0.14", features = ["fonts"] }
-tiny-skia = "0.11"
 
 fastembed = "5"
 usearch = "2"

@@ -255,6 +255,7 @@ impl<C: CompletionClient> RigAgent<C> {
             })
             .tool(super::tools::TypstRender {
                 pending_files: params.pending_files.clone(),
+                config: params.config.clone(),
             })
             .tool(super::tools::SearchMemory {
                 vectordb: params.memory.vectordb().clone(),
