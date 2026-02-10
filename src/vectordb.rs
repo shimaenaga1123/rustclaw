@@ -55,8 +55,8 @@ impl VectorDb {
                 timestamp_us INTEGER NOT NULL
             )",
         )
-            .execute(&pool)
-            .await?;
+        .execute(&pool)
+        .await?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS important (
@@ -66,8 +66,8 @@ impl VectorDb {
                 timestamp_us INTEGER NOT NULL
             )",
         )
-            .execute(&pool)
-            .await?;
+        .execute(&pool)
+        .await?;
 
         let index_path = data_dir.join(INDEX_FILE);
         let options = IndexOptions {
@@ -140,7 +140,7 @@ impl VectorDb {
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
             Ok(())
         })
-            .await??;
+        .await??;
 
         Ok(())
     }
@@ -172,8 +172,8 @@ impl VectorDb {
             let idx = index.lock().unwrap();
             idx.search(&embedding, fetch_n)
         })
-            .await?
-            .map_err(|e| anyhow::anyhow!("{}", e))?;
+        .await?
+        .map_err(|e| anyhow::anyhow!("{}", e))?;
 
         let rowids: Vec<i64> = results.keys.iter().map(|k| *k as i64).collect();
         if rowids.is_empty() {
@@ -223,8 +223,8 @@ impl VectorDb {
         let rows = sqlx::query_as::<_, ImportantRow>(
             "SELECT id, content, timestamp_us FROM important ORDER BY timestamp_us ASC",
         )
-            .fetch_all(&self.pool)
-            .await?;
+        .fetch_all(&self.pool)
+        .await?;
 
         Ok(rows.into_iter().map(|r| r.into()).collect())
     }

@@ -39,8 +39,7 @@ async fn main() -> Result<()> {
             ))
         }
         _ => {
-            let local =
-                embeddings::LocalEmbedding::new(&config.data_dir.join("models"))?;
+            let local = embeddings::LocalEmbedding::new(&config.data_dir.join("models"))?;
             local.start_unload_timer();
             Arc::new(local)
         }

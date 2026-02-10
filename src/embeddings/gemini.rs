@@ -1,8 +1,8 @@
-use serde::Deserialize;
+use crate::embeddings::types;
 use anyhow::Result;
 use async_trait::async_trait;
+use serde::Deserialize;
 use tracing::info;
-use crate::embeddings::types;
 
 const GEMINI_DEFAULT_DIM: usize = 768;
 const GEMINI_BASE_URL: &str = "https://generativelanguage.googleapis.com/v1beta";

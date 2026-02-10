@@ -1,11 +1,11 @@
+use crate::embeddings::types::EmbeddingService;
+use anyhow::{Context, Result};
+use async_trait::async_trait;
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tracing::info;
-use anyhow::{Context, Result};
-use async_trait::async_trait;
-use crate::embeddings::types::EmbeddingService;
 
 const LOCAL_DIM: usize = 384;
 const IDLE_TIMEOUT: Duration = Duration::from_secs(300);
