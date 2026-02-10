@@ -8,7 +8,7 @@ description = "A lightweight, memory-aware Discord AI assistant powered by Anthr
 license = "MIT"
 
 [dependencies]
-serenity = { version = "0.12", default-features = false, features = ["rustls_backend", "client", "gateway", "model", "cache"] }
+poise = "0.6"
 
 rig-core = "0.30"
 
