@@ -239,14 +239,14 @@ impl<C: CompletionClient> RigAgent<C> {
                 is_owner: params.is_owner,
             })
             .tool(super::tools::ImportantAdd {
-                vectordb: params.memory.vectordb().clone(),
+                vectordb: params.memory.vector_db().clone(),
                 is_owner: params.is_owner,
             })
             .tool(super::tools::ImportantList {
-                vectordb: params.memory.vectordb().clone(),
+                vectordb: params.memory.vector_db().clone(),
             })
             .tool(super::tools::ImportantDelete {
-                vectordb: params.memory.vectordb().clone(),
+                vectordb: params.memory.vector_db().clone(),
                 is_owner: params.is_owner,
             })
             .tool(super::tools::SendFile {
@@ -258,7 +258,7 @@ impl<C: CompletionClient> RigAgent<C> {
                 config: params.config.clone(),
             })
             .tool(super::tools::SearchMemory {
-                vectordb: params.memory.vectordb().clone(),
+                vectordb: params.memory.vector_db().clone(),
             })
             .tool(super::tools::Weather {
                 client: reqwest::Client::new(),

@@ -1,7 +1,7 @@
 use crate::embeddings::EmbeddingService;
+use crate::entity::{conversations, important};
 use anyhow::{Context, Result};
-use sqlx::FromRow;
-use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
+use sea_orm::*;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use tracing::info;
@@ -10,24 +10,8 @@ use usearch::ffi::{IndexOptions, MetricKind, ScalarKind};
 
 const INDEX_FILE: &str = "conversations.usearch";
 
-#[derive(FromRow)]
-struct ConversationRow {
-    id: String,
-    author: String,
-    user_input: String,
-    assistant_response: String,
-    timestamp_us: i64,
-}
-
-#[derive(FromRow)]
-struct ImportantRow {
-    id: String,
-    content: String,
-    timestamp_us: i64,
-}
-
 pub struct VectorDb {
-    pool: SqlitePool,
+    db: Arc<DatabaseConnection>,
     index: Arc<Mutex<Index>>,
     embeddings: Arc<dyn EmbeddingService>,
     index_path: PathBuf,
@@ -39,35 +23,17 @@ impl VectorDb {
         std::fs::create_dir_all(data_dir)?;
         let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
 
-        let pool = SqlitePoolOptions::new()
-            .max_connections(2)
-            .connect(&db_url)
-            .await
-            .context("Failed to connect to SQLite")?;
+        let db = tokio::task::spawn_blocking(move || -> Result<DatabaseConnection> {
+            let db = Database::connect(&db_url)?;
 
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS conversations (
-                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-                id TEXT UNIQUE NOT NULL,
-                author TEXT NOT NULL,
-                user_input TEXT NOT NULL,
-                assistant_response TEXT NOT NULL,
-                timestamp_us INTEGER NOT NULL
-            )",
-        )
-        .execute(&pool)
-        .await?;
+            db.get_schema_builder()
+                .register(conversations::Entity)
+                .register(important::Entity)
+                .apply(&db)?;
 
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS important (
-                rowid INTEGER PRIMARY KEY AUTOINCREMENT,
-                id TEXT UNIQUE NOT NULL,
-                content TEXT NOT NULL,
-                timestamp_us INTEGER NOT NULL
-            )",
-        )
-        .execute(&pool)
-        .await?;
+            Ok(db)
+        })
+        .await??;
 
         let index_path = data_dir.join(INDEX_FILE);
         let options = IndexOptions {
@@ -88,13 +54,13 @@ impl VectorDb {
         }
 
         let instance = Arc::new(Self {
-            pool,
+            db: Arc::new(db),
             index: Arc::new(Mutex::new(index)),
             embeddings,
             index_path,
         });
 
-        info!("VectorDB ready (usearch + SQLite)");
+        info!("VectorDB ready (usearch + rusqlite)");
         Ok(instance)
     }
 
@@ -113,22 +79,23 @@ impl VectorDb {
         );
         let embedding = self.embeddings.embed_passage(&combined).await?;
 
-        let result = sqlx::query(
-            "INSERT INTO conversations (id, author, user_input, assistant_response, timestamp_us) VALUES (?, ?, ?, ?, ?)",
-        )
-            .bind(&id)
-            .bind(author)
-            .bind(user_input)
-            .bind(assistant_response)
-            .bind(now)
-            .execute(&self.pool)
-            .await?;
+        let record = conversations::ActiveModel {
+            rowid: NotSet,
+            id: Set(id),
+            author: Set(author.to_string()),
+            user_input: Set(user_input.to_string()),
+            assistant_response: Set(assistant_response.to_string()),
+            timestamp_us: Set(now),
+        };
 
-        let rowid = result.last_insert_rowid() as u64;
-
+        let db = self.db.clone();
         let index = self.index.clone();
         let index_path = self.index_path.clone();
+
         tokio::task::spawn_blocking(move || -> Result<()> {
+            let result = conversations::Entity::insert(record).exec(db.as_ref())?;
+            let rowid = result.last_insert_id as u64;
+
             let idx = index.lock().unwrap();
             if idx.size() + 1 >= idx.capacity() {
                 idx.reserve(idx.capacity() + 1000)
@@ -146,16 +113,19 @@ impl VectorDb {
     }
 
     pub async fn recent_turns(&self, n: usize) -> Result<Vec<ConversationTurn>> {
-        let rows = sqlx::query_as::<_, ConversationRow>(
-            "SELECT id, author, user_input, assistant_response, timestamp_us FROM conversations ORDER BY timestamp_us DESC LIMIT ?",
-        )
-            .bind(n as i64)
-            .fetch_all(&self.pool)
-            .await?;
+        let db = self.db.clone();
 
-        let mut turns: Vec<ConversationTurn> = rows.into_iter().map(|r| r.into()).collect();
-        turns.reverse();
-        Ok(turns)
+        tokio::task::spawn_blocking(move || -> Result<Vec<ConversationTurn>> {
+            let rows = conversations::Entity::find()
+                .order_by_desc(conversations::Column::TimestampUs)
+                .limit(n as u64)
+                .all(db.as_ref())?;
+
+            let mut turns: Vec<ConversationTurn> = rows.into_iter().map(|r| r.into()).collect();
+            turns.reverse();
+            Ok(turns)
+        })
+        .await?
     }
 
     pub async fn search_turns(
@@ -166,76 +136,89 @@ impl VectorDb {
     ) -> Result<Vec<ConversationTurn>> {
         let embedding = self.embeddings.embed_query(query).await?;
         let fetch_n = top_k + exclude_ids.len() + 5;
+        let exclude = exclude_ids.to_vec();
 
         let index = self.index.clone();
-        let results = tokio::task::spawn_blocking(move || {
-            let idx = index.lock().unwrap();
-            idx.search(&embedding, fetch_n)
+        let db = self.db.clone();
+
+        tokio::task::spawn_blocking(move || -> Result<Vec<ConversationTurn>> {
+            let results = {
+                let idx = index.lock().unwrap();
+                idx.search(&embedding, fetch_n)
+                    .map_err(|e| anyhow::anyhow!("{}", e))?
+            };
+
+            let rowids: Vec<i64> = results.keys.iter().map(|k| *k as i64).collect();
+            if rowids.is_empty() {
+                return Ok(Vec::new());
+            }
+
+            let rows = conversations::Entity::find()
+                .filter(conversations::Column::Rowid.is_in(rowids))
+                .all(db.as_ref())?;
+
+            let mut turns: Vec<ConversationTurn> = rows
+                .into_iter()
+                .map(|r| r.into())
+                .filter(|t: &ConversationTurn| !exclude.contains(&t.id))
+                .collect();
+
+            turns.sort_by(|a, b| a.timestamp_micros.cmp(&b.timestamp_micros));
+            turns.truncate(top_k);
+            Ok(turns)
         })
         .await?
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
-
-        let rowids: Vec<i64> = results.keys.iter().map(|k| *k as i64).collect();
-        if rowids.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let placeholders: String = rowids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
-        let sql = format!(
-            "SELECT id, author, user_input, assistant_response, timestamp_us \
-             FROM conversations WHERE rowid IN ({})",
-            placeholders
-        );
-
-        let mut q = sqlx::query_as::<_, ConversationRow>(&sql);
-        for rowid in &rowids {
-            q = q.bind(rowid);
-        }
-        let rows = q.fetch_all(&self.pool).await?;
-
-        let mut turns: Vec<ConversationTurn> = rows
-            .into_iter()
-            .map(|r| r.into())
-            .filter(|t: &ConversationTurn| !exclude_ids.contains(&t.id))
-            .collect();
-
-        turns.sort_by(|a, b| a.timestamp_micros.cmp(&b.timestamp_micros));
-        turns.truncate(top_k);
-        Ok(turns)
     }
 
     pub async fn add_important(&self, content: &str) -> Result<String> {
         let id = uuid::Uuid::new_v4().to_string()[..8].to_string();
         let now = chrono::Utc::now().timestamp_micros();
 
-        sqlx::query("INSERT INTO important (id, content, timestamp_us) VALUES (?, ?, ?)")
-            .bind(&id)
-            .bind(content)
-            .bind(now)
-            .execute(&self.pool)
-            .await?;
+        let record = important::ActiveModel {
+            rowid: NotSet,
+            id: Set(id.clone()),
+            content: Set(content.to_string()),
+            timestamp_us: Set(now),
+        };
+
+        let db = self.db.clone();
+        tokio::task::spawn_blocking(move || -> Result<()> {
+            important::Entity::insert(record).exec(db.as_ref())?;
+            Ok(())
+        })
+        .await??;
 
         info!("Added important entry: {}", id);
         Ok(id)
     }
 
     pub async fn list_important(&self) -> Result<Vec<ImportantEntry>> {
-        let rows = sqlx::query_as::<_, ImportantRow>(
-            "SELECT id, content, timestamp_us FROM important ORDER BY timestamp_us ASC",
-        )
-        .fetch_all(&self.pool)
-        .await?;
+        let db = self.db.clone();
 
-        Ok(rows.into_iter().map(|r| r.into()).collect())
+        tokio::task::spawn_blocking(move || -> Result<Vec<ImportantEntry>> {
+            let rows = important::Entity::find()
+                .order_by_asc(important::Column::TimestampUs)
+                .all(db.as_ref())?;
+
+            Ok(rows.into_iter().map(|r| r.into()).collect())
+        })
+        .await?
     }
 
     pub async fn delete_important(&self, id: &str) -> Result<bool> {
-        let result = sqlx::query("DELETE FROM important WHERE id = ?")
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
-        info!("Deleted important entry: {}", id);
-        Ok(result.rows_affected() > 0)
+        let db = self.db.clone();
+        let id = id.to_string();
+
+        let affected = tokio::task::spawn_blocking(move || -> Result<u64> {
+            let result = important::Entity::delete_many()
+                .filter(important::Column::Id.eq(&id))
+                .exec(db.as_ref())?;
+            Ok(result.rows_affected)
+        })
+        .await??;
+
+        info!("Deleted important entry");
+        Ok(affected > 0)
     }
 
     pub async fn get_important_context(&self) -> Result<String> {
@@ -270,8 +253,8 @@ impl ConversationTurn {
     }
 }
 
-impl From<ConversationRow> for ConversationTurn {
-    fn from(r: ConversationRow) -> Self {
+impl From<conversations::Model> for ConversationTurn {
+    fn from(r: conversations::Model) -> Self {
         Self {
             id: r.id,
             author: r.author,
@@ -289,8 +272,8 @@ pub struct ImportantEntry {
     pub timestamp_micros: i64,
 }
 
-impl From<ImportantRow> for ImportantEntry {
-    fn from(r: ImportantRow) -> Self {
+impl From<important::Model> for ImportantEntry {
+    fn from(r: important::Model) -> Self {
         Self {
             id: r.id,
             content: r.content,

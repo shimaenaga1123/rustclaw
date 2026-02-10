@@ -2,11 +2,12 @@ mod agent;
 mod config;
 mod discord;
 mod embeddings;
+mod entity;
 mod memory;
 mod scheduler;
 mod tools;
 mod utils;
-mod vectordb;
+mod vector_db;
 
 use anyhow::Result;
 use tracing::{info, warn};
@@ -25,8 +26,8 @@ async fn main() -> Result<()> {
 
     let embedding_service = embeddings::create_embedding_service(config.clone()).await?;
 
-    let vectordb = vectordb::VectorDb::new(&config.data_dir, embedding_service).await?;
-    let memory_manager = memory::MemoryManager::new(vectordb.clone()).await?;
+    let vector_db = vector_db::VectorDb::new(&config.data_dir, embedding_service).await?;
+    let memory_manager = memory::MemoryManager::new(vector_db.clone()).await?;
 
     let agent = agent::create_agent(config.clone(), memory_manager.clone()).await?;
 

@@ -1,5 +1,5 @@
 use super::error::ToolError;
-use crate::vectordb::VectorDb;
+use crate::vector_db::VectorDb;
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
