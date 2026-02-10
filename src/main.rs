@@ -9,11 +9,8 @@ mod utils;
 mod vectordb;
 
 use anyhow::Result;
-use std::sync::Arc;
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
-use embeddings::EmbeddingService;
 
 #[tokio::main]
 async fn main() -> Result<()> {
