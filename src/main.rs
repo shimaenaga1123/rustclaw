@@ -9,8 +9,11 @@ mod utils;
 mod vectordb;
 
 use anyhow::Result;
+use std::sync::Arc;
 use tracing::{info, warn};
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+
+use embeddings::EmbeddingService;
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -23,13 +26,27 @@ async fn main() -> Result<()> {
 
     let config = config::Config::load()?;
 
-    let embedding_service = std::sync::Arc::new(
-        embeddings::EmbeddingService::new(&config.data_dir.join("models"))
-            .expect("Failed to initialize embedding service"),
-    );
-    embedding_service.start_unload_timer();
+    let embedding_service: Arc<dyn EmbeddingService> = match config.embedding_provider.as_str() {
+        "gemini" => {
+            let api_key = config
+                .embedding_api_key
+                .as_deref()
+                .unwrap_or(&config.api_key);
+            Arc::new(embeddings::GeminiEmbedding::new(
+                api_key,
+                config.embedding_model.as_deref(),
+                config.embedding_dimensions,
+            ))
+        }
+        _ => {
+            let local =
+                embeddings::LocalEmbedding::new(&config.data_dir.join("models"))?;
+            local.start_unload_timer();
+            Arc::new(local)
+        }
+    };
 
-    let vectordb = vectordb::VectorDb::new(&config.data_dir, embedding_service.clone()).await?;
+    let vectordb = vectordb::VectorDb::new(&config.data_dir, embedding_service).await?;
     let memory_manager = memory::MemoryManager::new(vectordb.clone()).await?;
 
     let agent = agent::create_agent(config.clone(), memory_manager.clone()).await?;

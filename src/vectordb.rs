@@ -1,4 +1,4 @@
-use crate::embeddings::{EMBEDDING_DIM, EmbeddingService};
+use crate::embeddings::EmbeddingService;
 use anyhow::{Context, Result};
 use sqlx::FromRow;
 use sqlx::sqlite::{SqlitePool, SqlitePoolOptions};
@@ -29,12 +29,12 @@ struct ImportantRow {
 pub struct VectorDb {
     pool: SqlitePool,
     index: Arc<Mutex<Index>>,
-    embeddings: Arc<EmbeddingService>,
+    embeddings: Arc<dyn EmbeddingService>,
     index_path: PathBuf,
 }
 
 impl VectorDb {
-    pub async fn new(data_dir: &Path, embeddings: Arc<EmbeddingService>) -> Result<Arc<Self>> {
+    pub async fn new(data_dir: &Path, embeddings: Arc<dyn EmbeddingService>) -> Result<Arc<Self>> {
         let db_path = data_dir.join("memory.db");
         std::fs::create_dir_all(data_dir)?;
         let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
@@ -55,8 +55,8 @@ impl VectorDb {
                 timestamp_us INTEGER NOT NULL
             )",
         )
-        .execute(&pool)
-        .await?;
+            .execute(&pool)
+            .await?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS important (
@@ -66,14 +66,14 @@ impl VectorDb {
                 timestamp_us INTEGER NOT NULL
             )",
         )
-        .execute(&pool)
-        .await?;
+            .execute(&pool)
+            .await?;
 
         let index_path = data_dir.join(INDEX_FILE);
         let options = IndexOptions {
-            dimensions: EMBEDDING_DIM as usize,
+            dimensions: embeddings.dimensions(),
             metric: MetricKind::Cos,
-            quantization: ScalarKind::F32,
+            quantization: ScalarKind::F16,
             ..Default::default()
         };
         let index = Index::new(&options).context("Failed to create usearch index")?;
@@ -140,7 +140,7 @@ impl VectorDb {
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
             Ok(())
         })
-        .await??;
+            .await??;
 
         Ok(())
     }
@@ -172,8 +172,8 @@ impl VectorDb {
             let idx = index.lock().unwrap();
             idx.search(&embedding, fetch_n)
         })
-        .await?
-        .map_err(|e| anyhow::anyhow!("{}", e))?;
+            .await?
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
 
         let rowids: Vec<i64> = results.keys.iter().map(|k| *k as i64).collect();
         if rowids.is_empty() {
@@ -223,8 +223,8 @@ impl VectorDb {
         let rows = sqlx::query_as::<_, ImportantRow>(
             "SELECT id, content, timestamp_us FROM important ORDER BY timestamp_us ASC",
         )
-        .fetch_all(&self.pool)
-        .await?;
+            .fetch_all(&self.pool)
+            .await?;
 
         Ok(rows.into_iter().map(|r| r.into()).collect())
     }

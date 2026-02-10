@@ -10,6 +10,8 @@ struct ConfigFile {
     storage: StorageConfig,
     commands: CommandsConfig,
     model: ModelConfig,
+    #[serde(default)]
+    embedding: EmbeddingConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -46,6 +48,19 @@ struct ModelConfig {
     disable_reasoning: bool,
 }
 
+fn default_embedding_provider() -> String {
+    "local".to_string()
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+struct EmbeddingConfig {
+    #[serde(default = "default_embedding_provider")]
+    provider: String,
+    api_key: Option<String>,
+    model: Option<String>,
+    dimensions: Option<usize>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Config {
     pub discord_token: String,
@@ -58,6 +73,10 @@ pub struct Config {
     pub data_dir: PathBuf,
     pub command_timeout: u64,
     pub disable_reasoning: bool,
+    pub embedding_provider: String,
+    pub embedding_api_key: Option<String>,
+    pub embedding_model: Option<String>,
+    pub embedding_dimensions: Option<usize>,
 }
 
 impl Config {
@@ -79,6 +98,10 @@ impl Config {
             data_dir: config_file.storage.data_dir.into(),
             command_timeout: config_file.commands.timeout,
             disable_reasoning: config_file.model.disable_reasoning,
+            embedding_provider: config_file.embedding.provider,
+            embedding_api_key: config_file.embedding.api_key,
+            embedding_model: config_file.embedding.model,
+            embedding_dimensions: config_file.embedding.dimensions,
         })
     }
 

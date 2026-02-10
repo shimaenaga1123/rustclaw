@@ -1,23 +1,25 @@
-use anyhow::{Context, Result};
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tracing::info;
+use anyhow::{Context, Result};
+use async_trait::async_trait;
+use crate::embeddings::types::EmbeddingService;
 
-pub const EMBEDDING_DIM: i32 = 384;
+const LOCAL_DIM: usize = 384;
 const IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 
-pub struct EmbeddingService {
+pub struct LocalEmbedding {
     model: Arc<Mutex<Option<TextEmbedding>>>,
     cache_dir: PathBuf,
     last_used: Arc<Mutex<Instant>>,
 }
 
-impl EmbeddingService {
+impl LocalEmbedding {
     pub fn new(cache_dir: &Path) -> Result<Self> {
         info!(
-            "Embedding service initialized (lazy loading, {}s idle timeout)",
+            "Local embedding service initialized (lazy loading, {}s idle timeout)",
             IDLE_TIMEOUT.as_secs()
         );
         Ok(Self {
@@ -44,8 +46,15 @@ impl EmbeddingService {
             }
         });
     }
+}
 
-    pub async fn embed_passage(&self, text: &str) -> Result<Vec<f32>> {
+#[async_trait]
+impl EmbeddingService for LocalEmbedding {
+    fn dimensions(&self) -> usize {
+        LOCAL_DIM
+    }
+
+    async fn embed_passage(&self, text: &str) -> Result<Vec<f32>> {
         let text = format!("passage: {}", text);
         let model = self.model.clone();
         let cache_dir = self.cache_dir.clone();
@@ -57,11 +66,10 @@ impl EmbeddingService {
             let result = guard.as_mut().unwrap().embed(vec![text], None)?;
             Ok(result.into_iter().next().unwrap())
         })
-        .await
-        .context("Embedding task panicked")?
+        .await?
     }
 
-    pub async fn embed_query(&self, text: &str) -> Result<Vec<f32>> {
+    async fn embed_query(&self, text: &str) -> Result<Vec<f32>> {
         let text = format!("query: {}", text);
         let model = self.model.clone();
         let cache_dir = self.cache_dir.clone();
@@ -73,8 +81,7 @@ impl EmbeddingService {
             let result = guard.as_mut().unwrap().embed(vec![text], None)?;
             Ok(result.into_iter().next().unwrap())
         })
-        .await
-        .context("Embedding task panicked")?
+        .await?
     }
 }
 

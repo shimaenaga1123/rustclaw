@@ -15,25 +15,6 @@ key = "your_api_key_here"
 url = "https://api.anthropic.com/v1"
 model = "claude-sonnet-4-20250514"
 
-# Examples for other providers:
-# [api]
-# provider = "openai"
-# key = "sk-..."
-# url = "https://api.openai.com/v1"
-# model = "gpt-4o"
-#
-# [api]
-# provider = "openai"
-# key = "your_key"
-# url = "http://localhost:11434/v1"  # e.g., Ollama
-# model = "llama3"
-#
-# [api]
-# provider = "gemini"
-# key = "your_gemini_api_key_here"
-# url = "https://api.gemini.com/v1"
-# model = "gemini-3-flash-preview"
-
 [brave]
 # Brave Search API (optional) - Get from: https://brave.com/search/api/
 # api_key = "your_brave_api_key_here"
@@ -48,3 +29,11 @@ timeout = 30
 [model]
 # Set to true to disable extended thinking/reasoning
 disable_reasoning = false
+
+[embedding]
+# Embedding provider: "local" (fastembed, ~300-500MB RAM) or "gemini" (API, near-zero RAM)
+provider = "local"
+# Gemini embedding settings (only used when provider = "gemini"):
+# api_key = "your_gemini_api_key"  # omit to reuse [api] key
+# model = "gemini-embedding-001"
+# dimensions = 768

@@ -4,9 +4,12 @@ A lightweight, memory-aware Discord AI assistant powered by Anthropic-compatible
 
 ## Features
 
-- **Discord Integration**: Mention-based interaction
+- **Discord Integration**: Slash command (`/ask`) interaction
 - **Anthropic-compatible API**: Works with Claude, Minimax, and other Anthropic-compatible endpoints via [Rig](https://github.com/0xPlaygrounds/rig)
-- **Vector Memory System**: usearch + SQLite powered semantic memory with local embeddings (multilingual-e5-small)
+- **Pluggable Embedding System**: Choose between local or API-based embeddings
+  - **Local**: fastembed (multilingual-e5-small, 384d) — no API dependency, GPU-free
+  - **Gemini API**: Google's gemini-embedding-001 (768d, configurable) — near-zero RAM usage
+- **Vector Memory System**: usearch (F16 quantized) + SQLite powered semantic memory
   - **Important Facts**: Owner-managed persistent facts, always included in context
   - **Conversation History**: Every turn stored with embeddings for semantic retrieval
   - **Hybrid Context**: Recent 5 turns + top 10 semantically similar past conversations
@@ -26,6 +29,7 @@ A lightweight, memory-aware Discord AI assistant powered by Anthropic-compatible
 - Anthropic-compatible API Key (Claude, Minimax, etc.)
 - Docker (required for all command execution)
 - Brave Search API Key (optional)
+- Google Gemini API Key (optional, for Gemini embedding provider)
 
 ## Quick Start
 
@@ -63,7 +67,7 @@ cp config.example.toml config.toml
 cargo run --release
 ```
 
-On first run, the embedding model (~130MB) will be downloaded from HuggingFace automatically.
+On first run with the local embedding provider, the embedding model (~130MB) will be downloaded from HuggingFace automatically.
 
 ### Create Discord Bot
 
@@ -81,36 +85,6 @@ Ensure Docker is running. The bot will automatically pull the `oven/bun:debian` 
 docker pull oven/bun:debian  # optional, speeds up first run
 ```
 
-## Service Management
-
-### Linux (systemd)
-
-```bash
-systemctl --user start rustclaw      # Start
-systemctl --user stop rustclaw       # Stop
-systemctl --user restart rustclaw    # Restart
-systemctl --user status rustclaw     # Status
-journalctl --user -u rustclaw -f     # Logs
-```
-
-Enable auto-start on boot:
-
-```bash
-sudo loginctl enable-linger $USER
-```
-
-### macOS (launchd)
-
-```bash
-launchctl kickstart gui/$(id -u)/com.rustclaw.bot       # Start
-launchctl kill SIGTERM gui/$(id -u)/com.rustclaw.bot     # Stop
-launchctl kickstart -k gui/$(id -u)/com.rustclaw.bot     # Restart
-launchctl print gui/$(id -u)/com.rustclaw.bot            # Status
-tail -f ~/Library/Logs/rustclaw/rustclaw.log             # Logs
-```
-
-The service starts automatically on login via `RunAtLoad`.
-
 ## Auto-Update
 
 RustClaw automatically checks for new releases daily and updates the binary.
@@ -122,41 +96,6 @@ RustClaw automatically checks for new releases daily and updates the binary.
 - Uses cargo-dist's built-in updater (`rustclaw-update`) for downloading and verification
 - After updating, the main service is automatically restarted
 
-### Managing Auto-Update (Linux)
-
-```bash
-# Check timer status
-systemctl --user status rustclaw-update.timer
-
-# View update logs
-journalctl --user -u rustclaw-update
-
-# Trigger manual update
-systemctl --user start rustclaw-update
-
-# Disable auto-update
-systemctl --user disable --now rustclaw-update.timer
-
-# Re-enable auto-update
-systemctl --user enable --now rustclaw-update.timer
-```
-
-### Managing Auto-Update (macOS)
-
-```bash
-# Trigger manual update
-launchctl kickstart gui/$(id -u)/com.rustclaw.update
-
-# View update logs
-tail -f ~/Library/Logs/rustclaw/update.log
-
-# Disable auto-update
-launchctl bootout gui/$(id -u)/com.rustclaw.update
-
-# Re-enable auto-update
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.rustclaw.update.plist
-```
-
 ### Check Installed Version
 
 ```bash
@@ -165,17 +104,19 @@ cat ~/.local/share/rustclaw/version
 
 ## Usage
 
-Mention the bot in Discord to interact:
+Use the `/ask` slash command to interact with the bot:
 
 ```
-@YourBot What's the weather like today?
+/ask prompt:What's the weather like today?
 
-@YourBot search for rust async programming
+/ask prompt:search for rust async programming
 
-@YourBot run ls -la
+/ask prompt:run ls -la
 
-@YourBot remember that I prefer dark mode
+/ask prompt:remember that I prefer dark mode
 ```
+
+You can also attach files using the optional `file` parameter.
 
 ## Permission System
 
@@ -196,9 +137,54 @@ RustClaw distinguishes between the **bot owner** and **regular users**. The AI m
 - Can view important facts in context, but **cannot modify** them
 - AI refuses requests that could affect the host system, reveal internal configuration, or escalate privileges
 
+## Embedding Providers
+
+RustClaw supports pluggable embedding backends via the `[embedding]` config section.
+
+### Local (default)
+
+Uses [fastembed](https://github.com/Anush008/fastembed-rs) with the `multilingual-e5-small` model for fully offline, GPU-free embedding.
+
+- **Dimensions**: 384
+- **RAM usage**: ~300–500MB (ONNX Runtime, auto-unloads after 5 min idle)
+- **Latency**: ~10–50ms per embedding
+- **No API key required**
+
+```toml
+[embedding]
+provider = "local"
+```
+
+### Gemini API
+
+Uses Google's [Gemini Embedding API](https://ai.google.dev/gemini-api/docs/embeddings) for near-zero memory overhead.
+
+- **Dimensions**: 768 (configurable down to 64 via Matryoshka)
+- **RAM usage**: near-zero (HTTP calls only)
+- **Free tier**: generous limits, sufficient for most Discord bots
+- **Requires**: Gemini API key ([get one free](https://aistudio.google.com/apikey))
+
+```toml
+[embedding]
+provider = "gemini"
+# api_key = "your_gemini_key"  # omit to reuse [api].key
+# model = "gemini-embedding-001"
+# dimensions = 768
+```
+
+### Switching Providers
+
+When switching between providers, the embedding dimensions change (384 vs 768), so the existing vector index is incompatible. Delete the old index before restarting:
+
+```bash
+rm data/conversations.usearch
+```
+
+Conversation text in SQLite (`data/memory.db`) is preserved — only the vector index is rebuilt as new conversations come in. Existing conversations will not be searchable until re-embedded.
+
 ## Memory System
 
-RustClaw uses a vector-based memory system powered by **usearch** (HNSW index) and **SQLite** for storage, with **fastembed** (multilingual-e5-small) for local, GPU-free semantic search.
+RustClaw uses a vector-based memory system powered by **usearch** (HNSW index, F16 quantized) and **SQLite** for storage.
 
 ### Important Facts (`important` table)
 - Owner-managed key facts (preferences, dates, decisions)
@@ -238,8 +224,8 @@ RustClaw uses a vector-based memory system powered by **usearch** (HNSW index) a
 ### Data Storage
 
 - Metadata and text: `data/memory.db` (SQLite)
-- Vector index: `data/conversations.usearch` (usearch HNSW)
-- Embedding model cache: `data/models/`
+- Vector index: `data/conversations.usearch` (usearch HNSW, F16 quantized)
+- Embedding model cache: `data/models/` (local provider only)
 
 ## Tools
 
@@ -248,7 +234,7 @@ The bot has access to these tools:
 ### `run_command`
 Execute shell commands in an isolated Debian Docker container with Bun runtime:
 ```
-@YourBot run bun --version
+/ask prompt:run bun --version
 ```
 
 - All users' commands run inside `oven/bun:debian` containers
@@ -258,7 +244,7 @@ Execute shell commands in an isolated Debian Docker container with Bun runtime:
 ### `reset_container`
 Reset the Docker sandbox container (owner only):
 ```
-@YourBot reset the container
+/ask prompt:reset the container
 ```
 
 - Stops and removes the current container
@@ -268,17 +254,15 @@ Reset the Docker sandbox container (owner only):
 ### `web_search`
 Search the web using Brave API:
 ```
-@YourBot search for latest rust news
+/ask prompt:search for latest rust news
 ```
 
 ### `typst_render`
 Render Typst markup as a PNG image and send as a Discord attachment:
 ```
-@YourBot render this table:
-| Name | Score |
-| Alice | 95 |
+/ask prompt:render this table: | Name | Score | | Alice | 95 |
 
-@YourBot render the equation x^2 + y^2 = z^2
+/ask prompt:render the equation x^2 + y^2 = z^2
 ```
 
 - Tables, math equations, and formatted documents
@@ -288,7 +272,7 @@ Render Typst markup as a PNG image and send as a Discord attachment:
 ### `search_memory`
 Search past conversations semantically:
 ```
-@YourBot search memory for our discussion about database migration
+/ask prompt:search memory for our discussion about database migration
 ```
 
 - Returns the most relevant past conversation turns
@@ -297,49 +281,49 @@ Search past conversations semantically:
 ### `important_add`
 Save important information to persistent memory (owner only):
 ```
-@YourBot remember my birthday is January 1st
+/ask prompt:remember my birthday is January 1st
 ```
 
 ### `important_list`
 List all stored important facts:
 ```
-@YourBot show all important facts
+/ask prompt:show all important facts
 ```
 
 ### `important_delete`
 Remove an important entry by ID (owner only):
 ```
-@YourBot delete important entry abc123
+/ask prompt:delete important entry abc123
 ```
 
 ### `weather`
 Get current weather and forecast for any location:
 ```
-@YourBot what's the weather in Seoul?
+/ask prompt:what's the weather in Seoul?
 ```
 
 ### `send_file`
 Send files from the Docker workspace as Discord attachments:
 ```
-@YourBot create a script and send it to me
+/ask prompt:create a script and send it to me
 ```
 
 ### `schedule`
 Schedule recurring tasks with cron expressions:
 ```
-@YourBot schedule a daily weather check at 9am
+/ask prompt:schedule a daily weather check at 9am
 ```
 
 ### `list_schedules`
 List all scheduled tasks:
 ```
-@YourBot show my scheduled tasks
+/ask prompt:show my scheduled tasks
 ```
 
 ### `unschedule`
 Remove a scheduled task (owner only):
 ```
-@YourBot remove schedule abc123
+/ask prompt:remove schedule abc123
 ```
 
 Non-owner users will receive a permission denied error.
@@ -374,24 +358,23 @@ Scheduled tasks are automatically saved to `data/schedules.json` and restored on
 
 ## Project Structure
 
-## Project Structure
 ```
 rustclaw/
 ├── src/
-│   ├── main.rs           # Entry point with graceful shutdown
-│   ├── config.rs         # Configuration
+│   ├── main.rs           # Entry point, embedding provider selection, graceful shutdown
+│   ├── config.rs         # Configuration (including [embedding] section)
 │   ├── utils.rs          # Shared utilities (split_message, etc.)
-│   ├── embeddings.rs     # Local embedding service (fastembed, multilingual-e5-small)
-│   ├── vectordb.rs       # usearch + SQLite wrapper (conversations + important)
+│   ├── embeddings.rs     # EmbeddingService trait + LocalEmbedding / GeminiEmbedding
+│   ├── vectordb.rs       # usearch (F16) + SQLite wrapper (conversations + important)
 │   ├── agent.rs          # AI agent + Rig integration
 │   ├── tools/            # Tool implementations
-│   ├── discord.rs        # Discord event handler
+│   ├── discord.rs        # Discord event handler (/ask slash command)
 │   ├── memory.rs         # Memory manager (delegates to VectorDb)
 │   └── scheduler.rs      # Task scheduler
 └── data/
     ├── memory.db         # SQLite database (conversations + important)
-    ├── conversations.usearch  # usearch vector index
-    ├── models/           # Cached embedding model (~130MB)
+    ├── conversations.usearch  # usearch vector index (F16 quantized)
+    ├── models/           # Cached embedding model (~130MB, local provider only)
     ├── workspace/        # Docker sandbox mount
     └── schedules.json    # Scheduled tasks
 ```
@@ -400,30 +383,39 @@ rustclaw/
 
 See `config.example.toml` for all available options.
 
-## Releasing
+### Minimal Config
 
-RustClaw uses [cargo-dist](https://github.com/axodotdev/cargo-dist) for release builds and [cargo-release](https://github.com/crate-ci/cargo-release) for version management.
+```toml
+[discord]
+token = "your_discord_bot_token"
+owner_id = 123456789012345678
 
-### Setup (One-time)
+[api]
+provider = "anthropic"
+key = "your_api_key"
+url = "https://api.anthropic.com/v1"
+model = "claude-sonnet-4-20250514"
 
-```bash
-cargo install cargo-dist cargo-release
-cargo dist init   # Select: GitHub CI, targets: x86_64-unknown-linux-gnu + aarch64-apple-darwin
+[brave]
+
+[storage]
+data_dir = "data"
+
+[commands]
+timeout = 30
+
+[model]
+disable_reasoning = false
 ```
 
-### Cutting a Release
+### Low-Memory Config (Gemini Embeddings)
 
-```bash
-cargo release patch --execute   # 0.2.0 → 0.2.1 (bumps, commits, tags, pushes)
-```
+For servers with limited RAM, use the Gemini embedding provider to eliminate the ~300–500MB fastembed/ONNX overhead:
 
-This triggers GitHub Actions to build the binary and create a GitHub Release automatically. Servers with auto-update enabled will pick up the new version within 24 hours.
-
-### Verifying Before Release
-
-```bash
-cargo dist plan    # Preview what will be built
-cargo dist build   # Local test build
+```toml
+[embedding]
+provider = "gemini"
+api_key = "your_gemini_api_key"
 ```
 
 ## Development
@@ -460,9 +452,24 @@ Keybindings: `c` check, `l` clippy, `t` test, `r` run, `d` doc
 
 ## Troubleshooting
 
-### Embedding model download fails
+### Embedding model download fails (local provider)
 
 The model is downloaded from HuggingFace on first run. Ensure network access to `huggingface.co`. The model is cached in `data/models/` — delete this directory to force re-download.
+
+### Gemini embedding errors
+
+- Verify your API key is valid: `curl "https://generativelanguage.googleapis.com/v1beta/models?key=YOUR_KEY"`
+- Check free tier quota at [Google AI Studio](https://aistudio.google.com/)
+- If using `[api].key` as fallback, ensure the key has Gemini embedding access
+
+### Switching embedding providers
+
+When switching between `local` (384d) and `gemini` (768d), delete the vector index since dimensions are incompatible:
+
+```bash
+rm data/conversations.usearch
+# Restart — index rebuilds as new conversations come in
+```
 
 ### Database errors
 
@@ -538,6 +545,7 @@ MIT License - see [LICENSE](LICENSE) for details
 - [fastembed](https://github.com/Anush008/fastembed-rs) - Local embedding inference
 - [Typst](https://typst.app/) - Markup-based typesetting
 - [cargo-dist](https://github.com/axodotdev/cargo-dist) - Release automation
+- [Google Gemini](https://ai.google.dev/) - Embedding API
 
 ## Support
 
