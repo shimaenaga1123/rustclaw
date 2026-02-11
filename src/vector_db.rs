@@ -27,11 +27,16 @@ impl VectorDb {
             let db_url = db_url.clone();
             move || -> Result<()> {
                 let db = Database::connect(&db_url)?;
+                let backend = db.get_database_backend();
+                let schema = Schema::new(backend);
 
-                db.get_schema_builder()
-                    .register(conversations::Entity)
-                    .register(important::Entity)
-                    .apply(&db)?;
+                for mut table in [
+                    schema.create_table_from_entity(conversations::Entity),
+                    schema.create_table_from_entity(important::Entity),
+                ] {
+                    let table = table.if_not_exists();
+                    db.execute(table)?;
+                }
 
                 Ok(())
             }
