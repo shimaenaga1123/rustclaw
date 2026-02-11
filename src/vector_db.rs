@@ -21,7 +21,7 @@ impl VectorDb {
     pub async fn new(data_dir: &Path, embeddings: Arc<dyn EmbeddingService>) -> Result<Arc<Self>> {
         let db_path = data_dir.join("memory.db");
         std::fs::create_dir_all(data_dir)?;
-        let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
+        let db_url = format!("sqlite://{}?mode=rwc", db_path.display());
 
         tokio::task::spawn_blocking({
             let db_url = db_url.clone();
