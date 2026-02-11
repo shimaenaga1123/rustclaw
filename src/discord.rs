@@ -374,7 +374,7 @@ impl EventHandler for Handler {
                 let _ = reply_msg
                     .edit(
                         &ctx,
-                        EditMessage::new().content("처리 중 오류가 발생했습니다."),
+                        EditMessage::new().content("An error occurred while processing."),
                     )
                     .await;
             }
@@ -383,7 +383,7 @@ impl EventHandler for Handler {
                 let _ = reply_msg
                     .edit(
                         &ctx,
-                        EditMessage::new().content("처리 중 오류가 발생했습니다."),
+                        EditMessage::new().content("An error occurred while processing."),
                     )
                     .await;
             }
