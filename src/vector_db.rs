@@ -11,7 +11,7 @@ use usearch::ffi::{IndexOptions, MetricKind, ScalarKind};
 const INDEX_FILE: &str = "conversations.usearch";
 
 pub struct VectorDb {
-    db: Arc<DatabaseConnection>,
+    db_url: String,
     index: Arc<Mutex<Index>>,
     embeddings: Arc<dyn EmbeddingService>,
     index_path: PathBuf,
@@ -23,15 +23,18 @@ impl VectorDb {
         std::fs::create_dir_all(data_dir)?;
         let db_url = format!("sqlite:{}?mode=rwc", db_path.display());
 
-        let db = tokio::task::spawn_blocking(move || -> Result<DatabaseConnection> {
-            let db = Database::connect(&db_url)?;
+        tokio::task::spawn_blocking({
+            let db_url = db_url.clone();
+            move || -> Result<()> {
+                let db = Database::connect(&db_url)?;
 
-            db.get_schema_builder()
-                .register(conversations::Entity)
-                .register(important::Entity)
-                .apply(&db)?;
+                db.get_schema_builder()
+                    .register(conversations::Entity)
+                    .register(important::Entity)
+                    .apply(&db)?;
 
-            Ok(db)
+                Ok(())
+            }
         })
         .await??;
 
@@ -54,7 +57,7 @@ impl VectorDb {
         }
 
         let instance = Arc::new(Self {
-            db: Arc::new(db),
+            db_url,
             index: Arc::new(Mutex::new(index)),
             embeddings,
             index_path,
@@ -88,12 +91,13 @@ impl VectorDb {
             timestamp_us: Set(now),
         };
 
-        let db = self.db.clone();
         let index = self.index.clone();
         let index_path = self.index_path.clone();
+        let db_url = self.db_url.clone();
 
         tokio::task::spawn_blocking(move || -> Result<()> {
-            let result = conversations::Entity::insert(record).exec(db.as_ref())?;
+            let db = Database::connect(&db_url)?;
+            let result = conversations::Entity::insert(record).exec(&db)?;
             let rowid = result.last_insert_id as u64;
 
             let idx = index.lock().unwrap();
@@ -113,13 +117,14 @@ impl VectorDb {
     }
 
     pub async fn recent_turns(&self, n: usize) -> Result<Vec<ConversationTurn>> {
-        let db = self.db.clone();
+        let db_url = self.db_url.clone();
 
         tokio::task::spawn_blocking(move || -> Result<Vec<ConversationTurn>> {
+            let db = Database::connect(&db_url)?;
             let rows = conversations::Entity::find()
                 .order_by_desc(conversations::Column::TimestampUs)
                 .limit(n as u64)
-                .all(db.as_ref())?;
+                .all(&db)?;
 
             let mut turns: Vec<ConversationTurn> = rows.into_iter().map(|r| r.into()).collect();
             turns.reverse();
@@ -139,9 +144,10 @@ impl VectorDb {
         let exclude = exclude_ids.to_vec();
 
         let index = self.index.clone();
-        let db = self.db.clone();
+        let db_url = self.db_url.clone();
 
         tokio::task::spawn_blocking(move || -> Result<Vec<ConversationTurn>> {
+            let db = Database::connect(&db_url)?;
             let results = {
                 let idx = index.lock().unwrap();
                 idx.search(&embedding, fetch_n)
@@ -155,7 +161,7 @@ impl VectorDb {
 
             let rows = conversations::Entity::find()
                 .filter(conversations::Column::Rowid.is_in(rowids))
-                .all(db.as_ref())?;
+                .all(&db)?;
 
             let mut turns: Vec<ConversationTurn> = rows
                 .into_iter()
@@ -181,9 +187,10 @@ impl VectorDb {
             timestamp_us: Set(now),
         };
 
-        let db = self.db.clone();
+        let db_url = self.db_url.clone();
         tokio::task::spawn_blocking(move || -> Result<()> {
-            important::Entity::insert(record).exec(db.as_ref())?;
+            let db = Database::connect(&db_url)?;
+            important::Entity::insert(record).exec(&db)?;
             Ok(())
         })
         .await??;
@@ -193,12 +200,13 @@ impl VectorDb {
     }
 
     pub async fn list_important(&self) -> Result<Vec<ImportantEntry>> {
-        let db = self.db.clone();
+        let db_url = self.db_url.clone();
 
         tokio::task::spawn_blocking(move || -> Result<Vec<ImportantEntry>> {
+            let db = Database::connect(&db_url)?;
             let rows = important::Entity::find()
                 .order_by_asc(important::Column::TimestampUs)
-                .all(db.as_ref())?;
+                .all(&db)?;
 
             Ok(rows.into_iter().map(|r| r.into()).collect())
         })
@@ -206,13 +214,14 @@ impl VectorDb {
     }
 
     pub async fn delete_important(&self, id: &str) -> Result<bool> {
-        let db = self.db.clone();
+        let db_url = self.db_url.clone();
         let id = id.to_string();
 
         let affected = tokio::task::spawn_blocking(move || -> Result<u64> {
+            let db = Database::connect(&db_url)?;
             let result = important::Entity::delete_many()
                 .filter(important::Column::Id.eq(&id))
-                .exec(db.as_ref())?;
+                .exec(&db)?;
             Ok(result.rows_affected)
         })
         .await??;
