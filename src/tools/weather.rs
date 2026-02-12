@@ -67,8 +67,6 @@ struct DailyWeather {
     snowfall_sum: Option<Vec<f64>>,
 }
 
-
-
 impl Tool for Weather {
     const NAME: &'static str = "weather";
 
@@ -202,20 +200,27 @@ impl Tool for Weather {
             }
 
             if let Some(precip) = current.precipitation
-                && precip > 0.0 {
-                    output.push_str(&format!("Precipitation: {:.1} mm", precip));
-                    let details: Vec<String> = [
-                        current.rain.filter(|&v| v > 0.0).map(|v| format!("rain {:.1} mm", v)),
-                        current.snowfall.filter(|&v| v > 0.0).map(|v| format!("snow {:.1} cm", v)),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .collect();
-                    if !details.is_empty() {
-                        output.push_str(&format!(" ({})", details.join(", ")));
-                    }
-                    output.push('\n');
+                && precip > 0.0
+            {
+                output.push_str(&format!("Precipitation: {:.1} mm", precip));
+                let details: Vec<String> = [
+                    current
+                        .rain
+                        .filter(|&v| v > 0.0)
+                        .map(|v| format!("rain {:.1} mm", v)),
+                    current
+                        .snowfall
+                        .filter(|&v| v > 0.0)
+                        .map(|v| format!("snow {:.1} cm", v)),
+                ]
+                .into_iter()
+                .flatten()
+                .collect();
+                if !details.is_empty() {
+                    output.push_str(&format!(" ({})", details.join(", ")));
                 }
+                output.push('\n');
+            }
 
             if let Some(code) = current.weather_code {
                 output.push_str(&format!("Conditions: {}\n", weather_code_to_string(code)));
@@ -259,31 +264,42 @@ impl Tool for Weather {
                 }
 
                 // Precipitation breakdown
-                let precip_total = daily.precipitation_sum.as_ref().and_then(|v| v.get(i)).copied();
+                let precip_total = daily
+                    .precipitation_sum
+                    .as_ref()
+                    .and_then(|v| v.get(i))
+                    .copied();
                 if let Some(total) = precip_total
-                    && total > 0.0 {
-                        output.push_str(&format!(" | {:.1} mm total", total));
-                        let details: Vec<String> = [
-                            daily.rain_sum.as_ref()
-                                .and_then(|v| v.get(i))
-                                .filter(|&&v| v > 0.0)
-                                .map(|v| format!("rain {:.1} mm", v)),
-                            daily.showers_sum.as_ref()
-                                .and_then(|v| v.get(i))
-                                .filter(|&&v| v > 0.0)
-                                .map(|v| format!("showers {:.1} mm", v)),
-                            daily.snowfall_sum.as_ref()
-                                .and_then(|v| v.get(i))
-                                .filter(|&&v| v > 0.0)
-                                .map(|v| format!("snow {:.1} cm", v)),
-                        ]
-                        .into_iter()
-                        .flatten()
-                        .collect();
-                        if !details.is_empty() {
-                            output.push_str(&format!(" ({})", details.join(", ")));
-                        }
+                    && total > 0.0
+                {
+                    output.push_str(&format!(" | {:.1} mm total", total));
+                    let details: Vec<String> = [
+                        daily
+                            .rain_sum
+                            .as_ref()
+                            .and_then(|v| v.get(i))
+                            .filter(|&&v| v > 0.0)
+                            .map(|v| format!("rain {:.1} mm", v)),
+                        daily
+                            .showers_sum
+                            .as_ref()
+                            .and_then(|v| v.get(i))
+                            .filter(|&&v| v > 0.0)
+                            .map(|v| format!("showers {:.1} mm", v)),
+                        daily
+                            .snowfall_sum
+                            .as_ref()
+                            .and_then(|v| v.get(i))
+                            .filter(|&&v| v > 0.0)
+                            .map(|v| format!("snow {:.1} cm", v)),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                    if !details.is_empty() {
+                        output.push_str(&format!(" ({})", details.join(", ")));
                     }
+                }
 
                 output.push('\n');
             }

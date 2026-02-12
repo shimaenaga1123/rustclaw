@@ -39,7 +39,9 @@ impl LocalEmbedding {
                 let elapsed = last.elapsed();
                 drop(last);
                 if elapsed >= IDLE_TIMEOUT {
-                    let Ok(mut guard) = model.lock() else { continue };
+                    let Ok(mut guard) = model.lock() else {
+                        continue;
+                    };
                     if guard.is_some() {
                         *guard = None;
                         info!("Embedding model unloaded (idle for {}s)", elapsed.as_secs());

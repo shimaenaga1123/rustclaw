@@ -215,7 +215,6 @@ impl RunCommand {
                 let inspect = docker.inspect_exec(&exec_id).await.ok();
                 let exit_code = inspect.and_then(|i| i.exit_code);
 
-
                 match exit_code {
                     Some(0) | None => Ok(if output.is_empty() {
                         "Success".to_string()
