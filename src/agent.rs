@@ -263,9 +263,16 @@ impl<C: CompletionClient> RigAgent<C> {
                 client: reqwest::Client::new(),
             });
 
-        if params.disable_reasoning {
-            builder =
-                builder.additional_params(serde_json::json!({"thinking": {"type": "disabled"}}));
+        {
+            let mut extra = serde_json::Map::new();
+            if params.disable_reasoning {
+                extra.insert(
+                    "thinking".into(),
+                    serde_json::json!({"type": "disabled"}),
+                );
+            }
+            extra.insert("parallel_tool_calls".into(), serde_json::json!(true));
+            builder = builder.additional_params(serde_json::Value::Object(extra));
         }
 
         if params.is_owner {
