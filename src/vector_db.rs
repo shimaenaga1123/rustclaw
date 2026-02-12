@@ -54,7 +54,7 @@ impl VectorDb {
 
         if index_path.exists() {
             index
-                .load(index_path.to_str().unwrap())
+                .load(index_path.to_str().context("non-UTF8 index path")?)
                 .context("Failed to load usearch index")?;
             info!("Loaded usearch index ({} vectors)", index.size());
         } else {
@@ -105,14 +105,16 @@ impl VectorDb {
             let result = conversations::Entity::insert(record).exec(&db)?;
             let rowid = result.last_insert_id as u64;
 
-            let idx = index.lock().unwrap();
+            let idx = index
+                .lock()
+                .map_err(|e| anyhow::anyhow!("index lock poisoned: {e}"))?;
             if idx.size() + 1 >= idx.capacity() {
                 idx.reserve(idx.capacity() + 1000)
                     .map_err(|e| anyhow::anyhow!("{}", e))?;
             }
             idx.add(rowid, &embedding)
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
-            idx.save(index_path.to_str().unwrap())
+            idx.save(index_path.to_str().context("non-UTF8 index path")?)
                 .map_err(|e| anyhow::anyhow!("{}", e))?;
             Ok(())
         })
@@ -154,7 +156,9 @@ impl VectorDb {
         tokio::task::spawn_blocking(move || -> Result<Vec<ConversationTurn>> {
             let db = Database::connect(&db_url)?;
             let results = {
-                let idx = index.lock().unwrap();
+                let idx = index
+                    .lock()
+                    .map_err(|e| anyhow::anyhow!("index lock poisoned: {e}"))?;
                 idx.search(&embedding, fetch_n)
                     .map_err(|e| anyhow::anyhow!("{}", e))?
             };

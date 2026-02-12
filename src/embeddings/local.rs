@@ -35,9 +35,11 @@ impl LocalEmbedding {
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(60)).await;
-                let elapsed = last_used.lock().unwrap().elapsed();
+                let Ok(last) = last_used.lock() else { continue };
+                let elapsed = last.elapsed();
+                drop(last);
                 if elapsed >= IDLE_TIMEOUT {
-                    let mut guard = model.lock().unwrap();
+                    let Ok(mut guard) = model.lock() else { continue };
                     if guard.is_some() {
                         *guard = None;
                         info!("Embedding model unloaded (idle for {}s)", elapsed.as_secs());
@@ -60,11 +62,21 @@ impl EmbeddingService for LocalEmbedding {
         let cache_dir = self.cache_dir.clone();
         let last_used = self.last_used.clone();
         tokio::task::spawn_blocking(move || {
-            let mut guard = model.lock().unwrap();
+            let mut guard = model
+                .lock()
+                .map_err(|e| anyhow::anyhow!("model lock poisoned: {e}"))?;
             ensure_loaded(&mut guard, &cache_dir)?;
-            *last_used.lock().unwrap() = Instant::now();
-            let result = guard.as_mut().unwrap().embed(vec![text], None)?;
-            Ok(result.into_iter().next().unwrap())
+            *last_used
+                .lock()
+                .map_err(|e| anyhow::anyhow!("last_used lock poisoned: {e}"))? = Instant::now();
+            let result = guard
+                .as_mut()
+                .context("model not loaded after ensure_loaded")?
+                .embed(vec![text], None)?;
+            result
+                .into_iter()
+                .next()
+                .context("embedding model returned empty result")
         })
         .await?
     }
@@ -75,11 +87,21 @@ impl EmbeddingService for LocalEmbedding {
         let cache_dir = self.cache_dir.clone();
         let last_used = self.last_used.clone();
         tokio::task::spawn_blocking(move || {
-            let mut guard = model.lock().unwrap();
+            let mut guard = model
+                .lock()
+                .map_err(|e| anyhow::anyhow!("model lock poisoned: {e}"))?;
             ensure_loaded(&mut guard, &cache_dir)?;
-            *last_used.lock().unwrap() = Instant::now();
-            let result = guard.as_mut().unwrap().embed(vec![text], None)?;
-            Ok(result.into_iter().next().unwrap())
+            *last_used
+                .lock()
+                .map_err(|e| anyhow::anyhow!("last_used lock poisoned: {e}"))? = Instant::now();
+            let result = guard
+                .as_mut()
+                .context("model not loaded after ensure_loaded")?
+                .embed(vec![text], None)?;
+            result
+                .into_iter()
+                .next()
+                .context("embedding model returned empty result")
         })
         .await?
     }

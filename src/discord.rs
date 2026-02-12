@@ -266,8 +266,7 @@ impl EventHandler for Handler {
                             let _ = reply_msg
                                 .edit(&ctx, EditMessage::new().content(&current_chunk))
                                 .await;
-                        } else {
-                            let last = extra_messages.last_mut().unwrap();
+                        } else if let Some(last) = extra_messages.last_mut() {
                             let _ = last
                                 .edit(&ctx, EditMessage::new().content(&current_chunk))
                                 .await;
