@@ -211,7 +211,7 @@ impl RunCommand {
         })
         .await
         {
-            Ok(Ok(mut output)) => {
+            Ok(Ok(output)) => {
                 let inspect = docker.inspect_exec(&exec_id).await.ok();
                 let exit_code = inspect.and_then(|i| i.exit_code);
 

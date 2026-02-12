@@ -6,7 +6,7 @@ use iana_time_zone::get_timezone;
 use serde::{Deserialize, Serialize};
 use serenity::all::{ChannelId, CreateAttachment, CreateMessage, Http};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
 use tokio::sync::{Mutex, RwLock};
@@ -47,7 +47,7 @@ impl Scheduler {
         }
     }
 
-    pub async fn new(data_dir: &PathBuf, agent: Arc<dyn Agent>) -> Result<Arc<Self>> {
+    pub async fn new(data_dir: &Path, agent: Arc<dyn Agent>) -> Result<Arc<Self>> {
         let scheduler = JobScheduler::new().await?;
         let data_path = data_dir.join("schedules.json");
 
