@@ -37,7 +37,6 @@ struct GeocodingResult {
 struct WeatherResponse {
     current: Option<CurrentWeather>,
     daily: Option<DailyWeather>,
-    daily_units: Option<DailyUnits>,
 }
 
 #[derive(Deserialize)]
@@ -47,6 +46,10 @@ struct CurrentWeather {
     apparent_temperature: Option<f64>,
     weather_code: Option<i64>,
     wind_speed_10m: Option<f64>,
+    wind_gusts_10m: Option<f64>,
+    precipitation: Option<f64>,
+    rain: Option<f64>,
+    snowfall: Option<f64>,
 }
 
 #[derive(Deserialize)]
@@ -55,14 +58,16 @@ struct DailyWeather {
     weather_code: Vec<i64>,
     temperature_2m_max: Vec<f64>,
     temperature_2m_min: Vec<f64>,
+    apparent_temperature_max: Vec<f64>,
+    apparent_temperature_min: Vec<f64>,
     precipitation_probability_max: Option<Vec<i64>>,
+    precipitation_sum: Option<Vec<f64>>,
+    rain_sum: Option<Vec<f64>>,
+    showers_sum: Option<Vec<f64>>,
+    snowfall_sum: Option<Vec<f64>>,
 }
 
-#[derive(Deserialize)]
-struct DailyUnits {
-    temperature_2m_max: String,
-    temperature_2m_min: String,
-}
+
 
 impl Tool for Weather {
     const NAME: &'static str = "weather";
@@ -136,11 +141,11 @@ impl Tool for Weather {
                 ("longitude", location.longitude.to_string()),
                 (
                     "current",
-                    "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m".to_string(),
+                    "temperature_2m,relative_humidity_2m,apparent_temperature,weather_code,wind_speed_10m,wind_gusts_10m,precipitation,rain,snowfall".to_string(),
                 ),
                 (
                     "daily",
-                    "weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max".to_string(),
+                    "weather_code,temperature_2m_max,temperature_2m_min,apparent_temperature_max,apparent_temperature_min,precipitation_probability_max,precipitation_sum,rain_sum,showers_sum,snowfall_sum".to_string(),
                 ),
                 ("timezone", "auto".to_string()),
                 ("forecast_days", forecast_days.to_string()),
@@ -189,8 +194,28 @@ impl Tool for Weather {
             }
 
             if let Some(wind) = current.wind_speed_10m {
-                output.push_str(&format!("Wind: {:.1} km/h\n", wind));
+                output.push_str(&format!("Wind: {:.1} km/h", wind));
+                if let Some(gusts) = current.wind_gusts_10m {
+                    output.push_str(&format!(" (gusts {:.1} km/h)", gusts));
+                }
+                output.push('\n');
             }
+
+            if let Some(precip) = current.precipitation
+                && precip > 0.0 {
+                    output.push_str(&format!("Precipitation: {:.1} mm", precip));
+                    let details: Vec<String> = [
+                        current.rain.filter(|&v| v > 0.0).map(|v| format!("rain {:.1} mm", v)),
+                        current.snowfall.filter(|&v| v > 0.0).map(|v| format!("snow {:.1} cm", v)),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                    if !details.is_empty() {
+                        output.push_str(&format!(" ({})", details.join(", ")));
+                    }
+                    output.push('\n');
+                }
 
             if let Some(code) = current.weather_code {
                 output.push_str(&format!("Conditions: {}\n", weather_code_to_string(code)));
@@ -200,20 +225,13 @@ impl Tool for Weather {
         if let Some(daily) = weather.daily {
             output.push_str("\n## Forecast\n");
 
-            let unit = weather
-                .daily_units
-                .map(|u| u.temperature_2m_max)
-                .unwrap_or_else(|| "°C".to_string());
+            let unit = "°C";
 
-            for (i, date) in daily.time.iter().enumerate() {
+            for i in 0..daily.time.len() {
+                let date = &daily.time[i];
                 let max = daily.temperature_2m_max.get(i).unwrap_or(&0.0);
                 let min = daily.temperature_2m_min.get(i).unwrap_or(&0.0);
                 let code = daily.weather_code.get(i).unwrap_or(&0);
-                let precip = daily
-                    .precipitation_probability_max
-                    .as_ref()
-                    .and_then(|p| p.get(i))
-                    .copied();
 
                 output.push_str(&format!(
                     "{}: {:.0}/{:.0}{} - {}",
@@ -224,9 +242,49 @@ impl Tool for Weather {
                     weather_code_to_string(*code)
                 ));
 
-                if let Some(p) = precip {
-                    output.push_str(&format!(" ({}% precip)", p));
+                // Apparent temperature
+                let feels_max = daily.apparent_temperature_max.get(i);
+                let feels_min = daily.apparent_temperature_min.get(i);
+                if let (Some(fm), Some(fn_)) = (feels_max, feels_min) {
+                    output.push_str(&format!(" (feels {:.0}/{:.0}{})", fm, fn_, unit));
                 }
+
+                // Precipitation probability
+                if let Some(p) = daily
+                    .precipitation_probability_max
+                    .as_ref()
+                    .and_then(|v| v.get(i))
+                {
+                    output.push_str(&format!(" | {}% precip", p));
+                }
+
+                // Precipitation breakdown
+                let precip_total = daily.precipitation_sum.as_ref().and_then(|v| v.get(i)).copied();
+                if let Some(total) = precip_total
+                    && total > 0.0 {
+                        output.push_str(&format!(" | {:.1} mm total", total));
+                        let details: Vec<String> = [
+                            daily.rain_sum.as_ref()
+                                .and_then(|v| v.get(i))
+                                .filter(|&&v| v > 0.0)
+                                .map(|v| format!("rain {:.1} mm", v)),
+                            daily.showers_sum.as_ref()
+                                .and_then(|v| v.get(i))
+                                .filter(|&&v| v > 0.0)
+                                .map(|v| format!("showers {:.1} mm", v)),
+                            daily.snowfall_sum.as_ref()
+                                .and_then(|v| v.get(i))
+                                .filter(|&&v| v > 0.0)
+                                .map(|v| format!("snow {:.1} cm", v)),
+                        ]
+                        .into_iter()
+                        .flatten()
+                        .collect();
+                        if !details.is_empty() {
+                            output.push_str(&format!(" ({})", details.join(", ")));
+                        }
+                    }
+
                 output.push('\n');
             }
         }
