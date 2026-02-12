@@ -120,6 +120,14 @@ data/
 └── schedules.json         # Persisted cron tasks
 ```
 
+## Security
+
+- **Credentials**: Discord token, LLM API key, and optional Brave/Gemini API keys are stored in plain text in `config.toml`. Keep this file private and never commit it to version control.
+- **Command Execution**: The `run_command` tool executes arbitrary shell commands inside a Docker container. While sandboxed, the `/workspace` directory is bind-mounted from the host. The owner permission system mitigates risk, but treat the bot owner account as privileged.
+- **Data Storage**: All conversation history (user input + assistant responses) is stored locally in `data/memory.db`. No data is sent to third parties beyond the configured LLM/embedding API providers.
+- **Network Access**: The Docker sandbox has network access enabled by default. Commands run inside can make outbound requests.
+- **Auto-Update**: The optional auto-updater downloads binaries from GitHub Releases. Verify releases at the [repository](https://github.com/shimaenaga1123/rustclaw/releases) if concerned.
+
 ## License
 
 MIT — see [LICENSE](LICENSE)
