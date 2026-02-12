@@ -233,7 +233,6 @@ impl<C: CompletionClient> RigAgent<C> {
             .client
             .agent(params.model)
             .preamble(params.preamble)
-            .max_tokens(4096)
             .tool(super::tools::RunCommand {
                 config: params.config.clone(),
                 is_owner: params.is_owner,

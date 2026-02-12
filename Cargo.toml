@@ -46,7 +46,6 @@ fastembed = { version = "5", default-features = false, features = ["hf-hub-rustl
 [profile.release]
 strip = true
 lto = "thin"
-panic = "abort"
 opt-level = 3
 
 [profile.dist]

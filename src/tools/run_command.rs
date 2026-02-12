@@ -215,10 +215,6 @@ impl RunCommand {
                 let inspect = docker.inspect_exec(&exec_id).await.ok();
                 let exit_code = inspect.and_then(|i| i.exit_code);
 
-                if !self.is_owner && output.len() > 4096 {
-                    output.truncate(4096);
-                    output.push_str("\n... (output truncated)");
-                }
 
                 match exit_code {
                     Some(0) | None => Ok(if output.is_empty() {

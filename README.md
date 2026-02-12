@@ -128,11 +128,9 @@ RustClaw distinguishes between the **bot owner** and **regular users**. The AI m
 - Can create, list, and **remove** scheduled tasks
 - Can **add**, **list**, and **delete** important memory entries
 - Can **reset** the Docker container
-- No output truncation
 
 ### Regular Users
 
-- Output truncated to 4096 characters
 - Can create and list scheduled tasks, but **cannot remove** them
 - Can view important facts in context, but **cannot modify** them
 - AI refuses requests that could affect the host system, reveal internal configuration, or escalate privileges
