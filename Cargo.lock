@@ -2524,9 +2524,9 @@ dependencies = [
 
 [[package]]
 name = "sea-orm-sync"
-version = "2.0.0-rc.31"
+version = "2.0.0-rc.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81112cc426e7bfd56ea6f802a2dc7af62021425a01204e10ebd37dd126fa680a"
+checksum = "e097a41c436033881de49b6d6303d24c91c740572a1f333affbf7f62ceb1ec11"
 dependencies = [
  "derive_more",
  "itertools",

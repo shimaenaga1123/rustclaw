@@ -37,7 +37,7 @@ bollard = "0.20"
 
 usearch = "2"
 
-sea-orm-sync = { version = "2.0.0-rc", default-features = false, features = ["rusqlite", "sync", "macros", "schema-sync"] }
+sea-orm-sync = { version = "2.0.0-rc.32", default-features = false, features = ["rusqlite", "sync", "macros", "schema-sync"] }
 libsqlite3-sys = { version = "0.35", features = ["bundled"] }
 
 [target.'cfg(not(windows))'.dependencies]
