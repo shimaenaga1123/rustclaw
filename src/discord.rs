@@ -253,7 +253,7 @@ impl EventHandler for Handler {
                 Ok(Some(StreamEvent::TextDelta(text))) => {
                     accumulated.push_str(&text);
 
-                    if accumulated.len() > DISCORD_MAX_LEN {
+                    if accumulated.chars().count() > DISCORD_MAX_LEN {
                         let (current_chunk, rest) =
                             utils::split_streaming(&accumulated, DISCORD_MAX_LEN);
                         accumulated = rest;

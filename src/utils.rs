@@ -1,5 +1,12 @@
+fn char_count_to_byte_pos(s: &str, n: usize) -> usize {
+    s.char_indices()
+        .nth(n)
+        .map(|(i, _)| i)
+        .unwrap_or(s.len())
+}
+
 pub fn split_message(text: &str, max_len: usize) -> Vec<String> {
-    if text.len() <= max_len {
+    if text.chars().count() <= max_len {
         return vec![text.to_string()];
     }
 
@@ -13,9 +20,9 @@ pub fn split_message(text: &str, max_len: usize) -> Vec<String> {
             None => String::new(),
         };
         let suffix_reserve = if open_code_block.is_some() { 4 } else { 0 };
-        let available = max_len - prefix.len() - suffix_reserve;
+        let available = max_len - prefix.chars().count() - suffix_reserve;
 
-        if remaining.len() <= available {
+        if remaining.chars().count() <= available {
             let mut chunk = prefix;
             chunk.push_str(remaining);
             if !chunk.trim().is_empty() {
@@ -24,7 +31,7 @@ pub fn split_message(text: &str, max_len: usize) -> Vec<String> {
             break;
         }
 
-        let boundary = remaining.floor_char_boundary(available);
+        let boundary = char_count_to_byte_pos(remaining, available);
         let split_at = remaining[..boundary]
             .rfind('\n')
             .map(|i| i + 1)
@@ -73,7 +80,7 @@ fn update_code_block_state(state: &mut Option<String>, text: &str) {
 }
 
 pub fn split_streaming(accumulated: &str, max_len: usize) -> (String, String) {
-    let boundary = accumulated.floor_char_boundary(max_len);
+    let boundary = char_count_to_byte_pos(accumulated, max_len);
     let split_at = accumulated[..boundary]
         .rfind('\n')
         .map(|i| i + 1)
