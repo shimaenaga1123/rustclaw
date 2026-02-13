@@ -35,6 +35,8 @@ iana-time-zone = "0.1.65"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json", "gzip", "brotli"] }
 bollard = "0.20"
 
+sys-locale = "0.3"
+
 usearch = "2"
 
 sea-orm-sync = { version = "2.0.0-rc.32", default-features = false, features = ["rusqlite", "sync", "macros", "schema-sync"] }

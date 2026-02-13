@@ -175,7 +175,8 @@ impl<C: CompletionClient> RigAgent<C> {
                preferences, dates, project details, or decisions worth recalling later.\n\
              - **important_list**: List all saved important facts.\n\
              - **important_delete**: Delete an important fact by ID.\n\
-             - **web_search**: Search the web via Brave Search for current events or fact-checking.\n\
+             - **web_search**: Search the web for current events or fact-checking.\n\
+             - **web_news**: Search for recent news articles (requires Serper provider).\n\
              - **weather**: Get current weather and forecast for a location.\n\
              - **schedule**: Create a recurring cron task. **list_schedules**: List all tasks. \
                **unschedule**: Remove a task by ID.\n",
@@ -275,11 +276,18 @@ impl<C: CompletionClient> RigAgent<C> {
             });
         }
 
-        if params.config.brave_api_key.is_some() {
+        if params.config.search_api_key.is_some() {
             builder = builder.tool(super::tools::WebSearch {
                 config: params.config.clone(),
                 client: reqwest::Client::new(),
             });
+
+            if params.config.search_provider == "serper" {
+                builder = builder.tool(super::tools::WebNews {
+                    config: params.config.clone(),
+                    client: reqwest::Client::new(),
+                });
+            }
         }
 
         if let Some(ref scheduler) = params.scheduler {

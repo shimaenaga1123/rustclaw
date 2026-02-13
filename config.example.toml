@@ -15,9 +15,11 @@ key = "your_api_key_here"
 url = "https://api.anthropic.com/v1"
 model = "claude-sonnet-4-20250514"
 
-[brave]
-# Brave Search API (optional) - Get from: https://brave.com/search/api/
-# api_key = "your_brave_api_key_here"
+[search]
+# Search provider: "brave" or "serper"
+provider = "brave"
+# API key for the selected provider
+# api_key = "your_search_api_key_here"
 
 [storage]
 data_dir = "data"

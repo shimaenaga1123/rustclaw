@@ -5,44 +5,33 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 #[derive(Deserialize, Serialize)]
-pub struct WebSearchArgs {
+pub struct WebNewsArgs {
     pub query: String,
-    #[serde(default = "default_count")]
-    pub count: i64,
-}
-
-fn default_count() -> i64 {
-    5
 }
 
 #[derive(Clone)]
-pub struct WebSearch {
+pub struct WebNews {
     pub config: Config,
     pub client: reqwest::Client,
 }
 
-impl Tool for WebSearch {
-    const NAME: &'static str = "web_search";
+impl Tool for WebNews {
+    const NAME: &'static str = "web_news";
 
     type Error = ToolError;
-    type Args = WebSearchArgs;
+    type Args = WebNewsArgs;
     type Output = String;
 
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "Perform web search".to_string(),
+            description: "Search for recent news articles".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "Search query"
-                    },
-                    "count": {
-                        "type": "integer",
-                        "description": "Number of results",
-                        "default": 5
+                        "description": "News search query"
                     }
                 },
                 "required": ["query"]
@@ -51,50 +40,6 @@ impl Tool for WebSearch {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        match self.config.search_provider.as_str() {
-            "serper" => self.search_serper(args).await,
-            _ => self.search_brave(args).await,
-        }
-    }
-}
-
-impl WebSearch {
-    async fn search_brave(&self, args: WebSearchArgs) -> Result<String, ToolError> {
-        let api_key = self
-            .config
-            .search_api_key
-            .as_ref()
-            .ok_or_else(|| ToolError::SearchFailed("Search API key not set".to_string()))?;
-
-        let response = self
-            .client
-            .get("https://api.search.brave.com/res/v1/web/search")
-            .header("X-Subscription-Token", api_key)
-            .header("Accept", "application/json")
-            .query(&[
-                ("q", args.query.as_str()),
-                ("count", args.count.to_string().as_str()),
-            ])
-            .send()
-            .await
-            .map_err(|e| ToolError::SearchFailed(e.to_string()))?;
-
-        if !response.status().is_success() {
-            return Err(ToolError::SearchFailed(format!(
-                "Brave API HTTP {}",
-                response.status()
-            )));
-        }
-
-        let data: serde_json::Value = response
-            .json()
-            .await
-            .map_err(|e| ToolError::SearchFailed(e.to_string()))?;
-
-        Ok(serde_json::to_string_pretty(&data).unwrap_or_default())
-    }
-
-    async fn search_serper(&self, args: WebSearchArgs) -> Result<String, ToolError> {
         let api_key = self
             .config
             .search_api_key
@@ -115,7 +60,7 @@ impl WebSearch {
 
         let response = self
             .client
-            .post("https://google.serper.dev/search")
+            .post("https://google.serper.dev/news")
             .header("X-API-KEY", api_key)
             .header("Content-Type", "application/json")
             .json(&body)
@@ -125,7 +70,7 @@ impl WebSearch {
 
         if !response.status().is_success() {
             return Err(ToolError::SearchFailed(format!(
-                "Serper API HTTP {}",
+                "Serper News API HTTP {}",
                 response.status()
             )));
         }

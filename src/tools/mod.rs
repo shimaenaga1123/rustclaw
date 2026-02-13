@@ -6,6 +6,7 @@ mod search_memory;
 mod send_file;
 mod typst_render;
 mod weather;
+mod web_news;
 mod web_search;
 
 pub use important::{ImportantAdd, ImportantDelete, ImportantList};
@@ -15,4 +16,5 @@ pub use search_memory::SearchMemory;
 pub use send_file::SendFile;
 pub use typst_render::TypstRender;
 pub use weather::Weather;
+pub use web_news::WebNews;
 pub use web_search::WebSearch;

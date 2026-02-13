@@ -6,7 +6,7 @@ use std::path::PathBuf;
 struct ConfigFile {
     discord: DiscordConfig,
     api: ApiConfig,
-    brave: BraveConfig,
+    search: SearchConfig,
     storage: StorageConfig,
     commands: CommandsConfig,
     model: ModelConfig,
@@ -29,7 +29,8 @@ struct ApiConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct BraveConfig {
+struct SearchConfig {
+    provider: String,
     api_key: Option<String>,
 }
 
@@ -69,7 +70,8 @@ pub struct Config {
     pub api_key: String,
     pub api_url: String,
     pub model: String,
-    pub brave_api_key: Option<String>,
+    pub search_provider: String,
+    pub search_api_key: Option<String>,
     pub data_dir: PathBuf,
     pub command_timeout: u64,
     pub disable_reasoning: bool,
@@ -94,7 +96,8 @@ impl Config {
             api_key: config_file.api.key,
             api_url: config_file.api.url,
             model: config_file.api.model,
-            brave_api_key: config_file.brave.api_key,
+            search_provider: config_file.search.provider,
+            search_api_key: config_file.search.api_key,
             data_dir: config_file.storage.data_dir.into(),
             command_timeout: config_file.commands.timeout,
             disable_reasoning: config_file.model.disable_reasoning,
