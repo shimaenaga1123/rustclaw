@@ -328,8 +328,18 @@ impl<C: CompletionClient> RigAgent<C> {
                     response_text.push_str(&text.text);
                 }
                 Ok(MultiTurnStreamItem::FinalResponse(res)) => {
+                    let final_text = res.response().to_string();
                     if response_text.is_empty() {
-                        response_text = res.response().to_string();
+                        let _ = tx.send(StreamEvent::TextDelta(final_text.clone())).await;
+                        response_text = final_text;
+                    } else if let Some(remaining) = final_text.strip_prefix(&response_text) {
+                        if !remaining.is_empty() {
+                            let _ = tx.send(StreamEvent::TextDelta(remaining.to_string())).await;
+                        }
+                        response_text = final_text;
+                    } else {
+                        let _ = tx.send(StreamEvent::TextDelta(final_text.clone())).await;
+                        response_text = final_text;
                     }
                 }
                 Err(e) => {
