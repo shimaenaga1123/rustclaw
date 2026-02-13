@@ -3,8 +3,8 @@ use anyhow::Result;
 use std::sync::Arc;
 use tracing::info;
 
-const RECENT_TURN_COUNT: usize = 5;
-const SEMANTIC_SEARCH_COUNT: usize = 10;
+const RECENT_TURN_COUNT: usize = 3;
+const SEMANTIC_SEARCH_COUNT: usize = 5;
 
 pub struct MemoryManager {
     vector_db: Arc<VectorDb>,
