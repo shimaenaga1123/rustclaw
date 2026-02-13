@@ -253,14 +253,10 @@ impl EventHandler for Handler {
                 Ok(Some(StreamEvent::TextDelta(text))) => {
                     accumulated.push_str(&text);
 
-                    if accumulated.len() > 1900 {
-                        let split_at = accumulated[..1900]
-                            .rfind('\n')
-                            .or_else(|| accumulated[..1900].rfind(' '))
-                            .unwrap_or(1900);
-
-                        let current_chunk: String = accumulated[..split_at].to_string();
-                        accumulated = accumulated[split_at..].to_string();
+                    if accumulated.len() > DISCORD_MAX_LEN {
+                        let (current_chunk, rest) =
+                            utils::split_streaming(&accumulated, DISCORD_MAX_LEN);
+                        accumulated = rest;
 
                         if extra_messages.is_empty() {
                             let _ = reply_msg
