@@ -102,7 +102,7 @@ impl WebSearch {
             .ok_or_else(|| ToolError::SearchFailed("Search API key not set".to_string()))?;
 
         let locale = sys_locale::get_locale().unwrap_or_else(|| "en-US".to_string());
-        let parts: Vec<&str> = locale.split(|c| c == '-' || c == '_').collect();
+        let parts: Vec<&str> = locale.split(['-', '_']).collect();
 
         let hl = parts.first().unwrap_or(&"en").to_lowercase();
         let gl = parts.last().unwrap_or(&"us").to_lowercase();

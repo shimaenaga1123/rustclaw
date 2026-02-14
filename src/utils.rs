@@ -1,8 +1,5 @@
 fn char_count_to_byte_pos(s: &str, n: usize) -> usize {
-    s.char_indices()
-        .nth(n)
-        .map(|(i, _)| i)
-        .unwrap_or(s.len())
+    s.char_indices().nth(n).map(|(i, _)| i).unwrap_or(s.len())
 }
 
 pub fn split_message(text: &str, max_len: usize) -> Vec<String> {
