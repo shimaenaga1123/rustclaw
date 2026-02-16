@@ -266,7 +266,7 @@ impl<C: CompletionClient> RigAgent<C> {
             if params.disable_reasoning {
                 extra.insert("thinking".into(), serde_json::json!({"type": "disabled"}));
             }
-            extra.insert("parallel_tool_calls".into(), serde_json::json!(true));
+            extra.insert("parallel_tool_calls".into(), serde_json::json!(false));
             builder = builder.additional_params(serde_json::Value::Object(extra));
         }
 
