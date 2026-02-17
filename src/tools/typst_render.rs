@@ -26,7 +26,6 @@ impl TypstRender {
     async fn exec_in_container(config: &Config, command: &str) -> Result<String, ToolError> {
         let runner = RunCommand {
             config: config.clone(),
-            is_owner: true,
         };
         runner
             .call(super::run_command::RunCommandArgs {

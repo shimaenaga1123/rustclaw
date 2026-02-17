@@ -31,7 +31,6 @@ pub struct RunCommandArgs {
 #[derive(Clone)]
 pub struct RunCommand {
     pub config: Config,
-    pub is_owner: bool,
 }
 
 impl RunCommand {
@@ -163,10 +162,7 @@ impl RunCommand {
     }
 
     async fn exec_in_container(&self, command: &str) -> Result<String, ToolError> {
-        debug!(
-            "Executing in persistent container (owner={}): {}",
-            self.is_owner, command
-        );
+        debug!("Executing in persistent container: {}", command);
 
         let docker = Docker::connect_with_local_defaults()
             .map_err(|e| ToolError::CommandFailed(format!("Docker connection failed: {}", e)))?;

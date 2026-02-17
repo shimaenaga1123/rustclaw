@@ -2356,6 +2356,7 @@ dependencies = [
  "futures-util",
  "iana-time-zone",
  "libsqlite3-sys",
+ "once_cell",
  "reqwest",
  "rig-core",
  "sea-orm-sync",
