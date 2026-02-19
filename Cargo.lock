@@ -3526,7 +3526,7 @@ dependencies = [
 
 [[package]]
 name = "rustclaw"
-version = "1.8.0"
+version = "1.8.1"
 dependencies = [
  "anyhow",
  "async-trait",
