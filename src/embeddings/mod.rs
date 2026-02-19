@@ -1,12 +1,10 @@
 mod gemini;
-#[cfg(not(windows))]
 mod local;
 mod types;
 
 use crate::config::Config;
 use anyhow::Result;
 pub use gemini::GeminiEmbedding;
-#[cfg(not(windows))]
 pub use local::LocalEmbedding;
 use std::sync::Arc;
 pub use types::EmbeddingService;
@@ -25,18 +23,9 @@ pub async fn create_embedding_service(config: Config) -> Result<Arc<dyn Embeddin
             )))
         }
         _ => {
-            #[cfg(not(windows))]
-            {
-                let local = LocalEmbedding::new(&config.data_dir.join("models"))?;
-                local.start_unload_timer();
-                Ok(Arc::new(local))
-            }
-            #[cfg(windows)]
-            {
-                anyhow::bail!(
-                    "Local embeddings (fastembed) are disabled on Windows. Please use 'gemini' provider in config.toml."
-                );
-            }
+            let local = LocalEmbedding::new(&config.data_dir.join("models"))?;
+            local.start_unload_timer();
+            Ok(Arc::new(local))
         }
     }
 }
