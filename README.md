@@ -11,7 +11,7 @@ Inspired by [NanoClaw](https://github.com/gavrielc/nanoclaw) and [OpenClaw](http
 - **Vector Memory** — usearch (F16 HNSW) + SQLite semantic memory with recent turns + similarity search
 - **Pluggable Embeddings** — Local (fastembed, 384d) or Gemini API (768d, near-zero RAM)
 - **Sandboxed Execution** — All commands run in isolated Debian Docker containers (Bun pre-installed)
-- **Tool Calling** — Shell commands, web search, weather, Typst rendering, file sending, cron scheduler
+- **Tool Calling** — Shell commands, web search, weather, YouTube search/transcript, Typst rendering, file sending, cron scheduler
 - **Owner/User Permissions** — AI-aware permission system for safe multi-user operation
 - **Auto-Update** — Daily binary updates via cargo-dist (systemd/launchd)
 
@@ -88,6 +88,8 @@ provider = "local"  # or "gemini"
 | `typst_render` | Render Typst markup (tables, math) to PNG | All |
 | `web_search` | Brave Search web lookup | All |
 | `weather` | Current weather and forecast | All |
+| `search_youtube` | YouTube video search (metadata) | All |
+| `get_transcript` | YouTube transcript retrieval | All |
 | `search_memory` | Semantic search over past conversations | All |
 | `schedule` / `list_schedules` | Create and list cron tasks | All |
 | `important_add` / `important_list` / `important_delete` | Manage persistent key facts | Owner only (add/delete) |

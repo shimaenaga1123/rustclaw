@@ -104,7 +104,9 @@ impl<C: CompletionClient> RigAgent<C> {
             })
             .tool(tools::Weather {
                 client: self.http_client.clone(),
-            });
+            })
+            .tool(tools::SearchYouTube {})
+            .tool(tools::GetTranscript {});
 
         {
             let mut extra = serde_json::Map::new();

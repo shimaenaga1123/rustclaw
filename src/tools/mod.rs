@@ -1,18 +1,22 @@
 mod error;
+mod get_transcript;
 mod important;
 mod run_command;
 mod schedule;
 mod search_memory;
+mod search_youtube;
 mod send_file;
 mod typst_render;
 mod weather;
 mod web_news;
 mod web_search;
 
+pub use get_transcript::GetTranscript;
 pub use important::{ImportantAdd, ImportantDelete, ImportantList};
 pub use run_command::{ResetContainer, RunCommand};
 pub use schedule::{ScheduleAdd, ScheduleDelete, ScheduleList};
 pub use search_memory::SearchMemory;
+pub use search_youtube::SearchYouTube;
 pub use send_file::SendFile;
 pub use typst_render::TypstRender;
 pub use weather::Weather;
