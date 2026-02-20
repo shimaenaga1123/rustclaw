@@ -10,7 +10,7 @@ license = "MIT"
 [dependencies]
 serenity = { version = "0.12", default-features = false, features = ["rustls_backend", "client", "gateway", "model", "cache"] }
 
-rig-core = { version = "0.30", default-features = false, features = ["reqwest-rustls"] }
+rig-core = { version = "0.31", default-features = false, features = ["reqwest-rustls"] }
 
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "sync", "time", "signal"] }
 tokio-cron-scheduler = "0.15"
