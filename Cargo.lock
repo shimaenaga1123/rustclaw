@@ -3531,6 +3531,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "bollard",
+ "cargo-husky",
  "chrono",
  "chrono-tz",
  "fastembed",
