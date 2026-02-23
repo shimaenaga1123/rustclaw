@@ -56,7 +56,7 @@ impl RunCommand {
         Ok(())
     }
 
-    async fn ensure_container(docker: &Docker, config: &Config) -> Result<(), ToolError> {
+    async fn ensure_container(docker: &Docker) -> Result<(), ToolError> {
         let _lock = CONTAINER_LOCK.lock().await;
 
         match docker.inspect_container(CONTAINER_NAME, None).await {
@@ -80,16 +80,8 @@ impl RunCommand {
 
                 Self::ensure_image(docker).await?;
 
-                let workspace = Self::workspace_path(config);
-                tokio::fs::create_dir_all(&workspace).await.map_err(|e| {
-                    ToolError::CommandFailed(format!("Failed to create workspace: {}", e))
-                })?;
-
-                let workspace_abs = workspace.canonicalize().map_err(|e| {
-                    ToolError::CommandFailed(format!("Failed to resolve workspace path: {}", e))
-                })?;
-
-                let bind = format!("{}:/workspace", workspace_abs.display());
+                let volume_name = "rustclaw-workspace";
+                let bind = format!("{}:/workspace", volume_name);
 
                 let host_config = HostConfig {
                     binds: Some(vec![bind]),
@@ -167,7 +159,7 @@ impl RunCommand {
         let docker = Docker::connect_with_local_defaults()
             .map_err(|e| ToolError::CommandFailed(format!("Docker connection failed: {}", e)))?;
 
-        Self::ensure_container(&docker, &self.config).await?;
+        Self::ensure_container(&docker).await?;
 
         let exec_options = CreateExecOptions {
             cmd: Some(vec!["bash", "-c", command]),
