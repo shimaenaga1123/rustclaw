@@ -16,5 +16,8 @@ RUN cargo build --release --locked
 FROM gcr.io/distroless/cc-debian13 AS runtime
 COPY --from=builder /lib/x86_64-linux-gnu/libmvec.so.1 /lib/x86_64-linux-gnu/
 COPY --from=builder /app/target/release/rustclaw /usr/local/bin/
+
+WORKDIR /app
 USER nonroot
+
 ENTRYPOINT ["rustclaw"]
