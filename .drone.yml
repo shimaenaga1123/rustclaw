@@ -4,7 +4,8 @@ name: build-and-push
 
 steps:
   - name: build-and-push
-    image: plugins/docker
+    image: plugins/docker-buildx
+    privileged: true
     settings:
       repo: ghcr.io/${DRONE_REPO_OWNER}/rustclaw
       registry: ghcr.io
@@ -16,7 +17,9 @@ steps:
       password:
         from_secret: ghcr_token
       cache_from:
-        - ghcr.io/${DRONE_REPO_OWNER}/rustclaw:latest
+        - type=registry,ref=ghcr.io/${DRONE_REPO_OWNER}/rustclaw:cache
+      cache_to:
+        - type=registry,ref=ghcr.io/${DRONE_REPO_OWNER}/rustclaw:cache,mode=max
 
 trigger:
   event:
