@@ -1,0 +1,25 @@
+kind: pipeline
+type: docker
+name: build-and-push
+
+steps:
+  - name: build-and-push
+    image: plugins/docker
+    settings:
+      repo: ghcr.io/${DRONE_REPO_OWNER}/rustclaw
+      registry: ghcr.io
+      tags:
+        - ${DRONE_TAG}
+        - latest
+      username:
+        from_secret: ghcr_username
+      password:
+        from_secret: ghcr_token
+      cache_from:
+        - ghcr.io/${DRONE_REPO_OWNER}/rustclaw:latest
+
+trigger:
+  event:
+    - tag
+  ref:
+    - refs/tags/v*
