@@ -22,3 +22,6 @@ x86_64-unknown-linux-gnu = "ubuntu-24.04"
 
 [dist.dependencies.apt]
 mold = "*"
+
+[dist.dependencies.homebrew]
+mold = "*"
