@@ -19,4 +19,4 @@ FROM gcr.io/distroless/cc-debian13 AS runtime
 ARG TARGETARCH
 COPY --from=builder /app/target/release/rustclaw /app/
 WORKDIR /app
-ENTRYPOINT ["rustclaw"]
+ENTRYPOINT ["/app/rustclaw"]
