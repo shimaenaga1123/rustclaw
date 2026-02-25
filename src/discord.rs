@@ -370,7 +370,7 @@ impl EventHandler for Handler {
             }
         }
 
-        // 스트림 unregister 및 CANCEL_EMOJI 리액션 제거
+        // unregister stream & remove CANCEL_EMOJI reaction
         self.active_streams.lock().await.remove(&cancel_msg_id);
         let _ = ctx
             .http
@@ -461,7 +461,7 @@ impl EventHandler for Handler {
                     .await;
             }
             Err(e) if e.is_cancelled() => {
-                // 이미 처리 완료
+                // Already processed when cancelled
             }
             Err(e) => {
                 error!("Task join error: {}", e);
@@ -476,12 +476,12 @@ impl EventHandler for Handler {
     }
 
     async fn reaction_add(&self, ctx: Context, reaction: Reaction) {
-        // CANCEL_EMOJI 이모지만 처리
+        // process only CANCEL_EMOJI
         if reaction.emoji != Self::cancel_emoji() {
             return;
         }
 
-        // 봇 자신의 리액션은 무시
+        // ignore bot itself reaction
         let bot_id = *self.bot_id.read().await;
         if reaction.user_id == bot_id {
             return;
@@ -499,7 +499,7 @@ impl EventHandler for Handler {
         };
 
         if !is_admin && user_id != ctrl.requester_id {
-            // 권한 없음 — 해당 유저의 리액션만 제거
+            // Not enough permission to cancel
             let emoji = reaction.emoji.clone();
             let _ = ctx
                 .http
@@ -524,7 +524,7 @@ impl EventHandler for Handler {
             return;
         }
 
-        // admin 전용
+        // for admin
         if cmd.user.id != self.owner_id {
             let response = CreateInteractionResponse::Message(
                 CreateInteractionResponseMessage::new()
