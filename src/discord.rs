@@ -268,13 +268,13 @@ impl EventHandler for Handler {
             }
         };
 
-        // CANCEL_EMOJI 리액션 추가
+        // Add CANCEL_EMOJI reaction
         if let Err(e) = reply_msg.react(&ctx, CANCEL_EMOJI).await {
             error!("Failed to add cancel reaction: {}", e);
         }
 
         let cancelled = Arc::new(AtomicBool::new(false));
-        // CANCEL_EMOJI가 붙어있는 메시지 ID를 추적
+        // Track message ID that has CANCEL_EMOJI attached
         let mut cancel_msg_id = reply_msg.id;
         self.active_streams.lock().await.insert(
             cancel_msg_id,
@@ -313,7 +313,7 @@ impl EventHandler for Handler {
 
                         match msg.channel_id.say(&ctx.http, "…").await {
                             Ok(new_msg) => {
-                                // 이전 메시지에서 CANCEL_EMOJI 제거 후 새 메시지로 이동
+                                // Remove CANCEL_EMOJI from previous message and Move to new message
                                 let _ = ctx
                                     .http
                                     .delete_message_reaction_emoji(
@@ -326,6 +326,7 @@ impl EventHandler for Handler {
                                     error!("Failed to move cancel reaction: {}", e);
                                 }
                                 // active_streams 키를 새 메시지 ID로 교체
+                                // Replace active_streams key with new message ID
                                 let mut streams = self.active_streams.lock().await;
                                 if let Some(ctrl) = streams.remove(&cancel_msg_id) {
                                     cancel_msg_id = new_msg.id;
