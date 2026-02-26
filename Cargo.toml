@@ -48,7 +48,7 @@ once_cell = "1.21.3"
 fastembed = { version = "5", default-features = false, features = ["hf-hub-rustls-tls", "ort-download-binaries-rustls-tls"] }
 
 [dev-dependencies]
-cargo-husky = {version = "1", features = ["precommit-hook", "run-cargo-check", "run-cargo-clippy", "run-cargo-fmt"]}
+cargo-husky = {version = "1", default-features = false, features = ["precommit-hook", "prepush-hook", "run-cargo-check", "run-cargo-clippy", "run-cargo-fmt"]}
 
 [profile.release]
 strip = true
