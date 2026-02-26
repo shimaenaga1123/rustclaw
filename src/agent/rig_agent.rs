@@ -181,6 +181,7 @@ impl<C: CompletionClient> RigAgent<C> {
         M: CompletionModel + 'static,
         R: Clone + Unpin + GetTokenUsage,
         A: StreamingPrompt<M, R>,
+        <A as StreamingPrompt<M, R>>::Hook: 'static,
     {
         let mut stream = agent.stream_prompt(prompt).await;
         let mut response_text = String::new();
