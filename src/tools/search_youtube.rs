@@ -1,8 +1,10 @@
 use super::error::ToolError;
 use rig::{completion::ToolDefinition, tool::Tool};
-use rusty_ytdl::search::{SearchOptions, SearchResult, SearchType, YouTube};
+use rustypipe::client::RustyPipe;
+use rustypipe::model::YouTubeItem;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::sync::Arc;
 
 #[derive(Deserialize, Serialize)]
 pub struct SearchYouTubeArgs {
@@ -15,20 +17,24 @@ fn default_count() -> i64 {
     5
 }
 
-#[derive(Clone, Default)]
-pub struct SearchYouTube {}
+#[derive(Clone)]
+pub struct SearchYouTube {
+    pub rp: Arc<RustyPipe>,
+}
 
 #[derive(Debug, Serialize)]
 struct SearchVideoResult {
     video_id: String,
     title: String,
     channel: Option<String>,
-    published_at: Option<String>,
+    channel_id: Option<String>,
     duration: Option<String>,
     description: Option<String>,
     thumbnail: Option<String>,
     views: Option<u64>,
-    length_seconds: Option<u64>,
+    length_seconds: Option<u32>,
+    is_live: bool,
+    is_short: bool,
 }
 
 impl Tool for SearchYouTube {
@@ -41,7 +47,7 @@ impl Tool for SearchYouTube {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "Search YouTube videos and return metadata using rusty_ytdl.".to_string(),
+            description: "Search YouTube videos and return metadata using rustypipe.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -61,41 +67,49 @@ impl Tool for SearchYouTube {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        let count = args.count.clamp(1, 50) as u64;
-        let youtube = YouTube::new().map_err(|e| {
-            ToolError::SearchFailed(format!("Failed to initialize search client: {}", e))
-        })?;
-        let options = SearchOptions {
-            limit: count,
-            search_type: SearchType::Video,
-            safe_search: false,
-        };
-        let search_results = youtube
-            .search(args.query.clone(), Some(&options))
+        let count = args.count.clamp(1, 50) as usize;
+
+        let search_results = self
+            .rp
+            .query()
+            .search(&args.query)
             .await
             .map_err(|e| ToolError::SearchFailed(format!("YouTube search failed: {}", e)))?;
 
-        let mut results = Vec::with_capacity(count as usize);
-        for entry in search_results {
-            if let SearchResult::Video(video) = entry {
-                let thumbnail = video
-                    .thumbnails
-                    .iter()
-                    .max_by_key(|thumb| thumb.width * thumb.height)
-                    .map(|thumb| thumb.url.clone());
+        let mut results = Vec::with_capacity(count);
+        for item in &search_results.items.items {
+            if let YouTubeItem::Video(video) = item {
+                let thumbnail = video.thumbnail.first().map(|t| t.url.to_string());
+
+                let duration = video.duration.unwrap_or_default();
+                let duration_str = if duration > 0 {
+                    let h = duration / 3600;
+                    let m = (duration % 3600) / 60;
+                    let s = duration % 60;
+                    if h > 0 {
+                        Some(format!("{}:{:02}:{:02}", h, m, s))
+                    } else {
+                        Some(format!("{}:{:02}", m, s))
+                    }
+                } else {
+                    None
+                };
+
                 results.push(SearchVideoResult {
-                    video_id: video.id,
-                    title: normalize_ws(&video.title),
-                    channel: Some(normalize_ws(&video.channel.name)),
-                    published_at: video.uploaded_at,
-                    duration: Some(video.duration_raw),
-                    description: truncate_chars(&normalize_ws(&video.description), 300),
+                    video_id: video.id.clone(),
+                    title: normalize_ws(&video.name),
+                    channel: video.channel.as_ref().map(|c| normalize_ws(&c.name)),
+                    channel_id: video.channel.as_ref().map(|c| c.id.clone()),
+                    duration: duration_str,
+                    description: video.short_description.clone(),
                     thumbnail,
-                    views: Some(video.views),
-                    length_seconds: Some(video.duration),
+                    views: video.view_count,
+                    length_seconds: video.duration,
+                    is_live: video.is_live,
+                    is_short: video.is_short,
                 });
             }
-            if results.len() >= count as usize {
+            if results.len() >= count {
                 break;
             }
         }
@@ -112,16 +126,4 @@ impl Tool for SearchYouTube {
 
 fn normalize_ws(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
-}
-
-fn truncate_chars(text: &str, max_chars: usize) -> Option<String> {
-    if text.is_empty() {
-        return None;
-    }
-    if text.chars().count() > max_chars {
-        let truncated = text.chars().take(max_chars).collect::<String>();
-        Some(format!("{}...", truncated))
-    } else {
-        Some(text.to_string())
-    }
 }

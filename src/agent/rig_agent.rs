@@ -12,6 +12,7 @@ use rig::{
     completion::{CompletionModel, GetTokenUsage},
     streaming::{StreamedAssistantContent, StreamingPrompt},
 };
+use rustypipe::client::RustyPipe;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 
@@ -61,6 +62,7 @@ pub struct RigAgent<C: CompletionClient> {
     memory: Arc<MemoryManager>,
     scheduler: RwLock<Option<Arc<Scheduler>>>,
     http_client: reqwest::Client,
+    rp: Arc<RustyPipe>,
     client: C,
 }
 
@@ -71,6 +73,7 @@ impl<C: CompletionClient> RigAgent<C> {
             memory,
             scheduler: RwLock::new(None),
             http_client: reqwest::Client::new(),
+            rp: Arc::new(RustyPipe::new()),
             client,
         }))
     }
@@ -105,8 +108,13 @@ impl<C: CompletionClient> RigAgent<C> {
             .tool(tools::Weather {
                 client: self.http_client.clone(),
             })
-            .tool(tools::SearchYouTube {})
-            .tool(tools::GetTranscript {});
+            .tool(tools::SearchYouTube {
+                rp: self.rp.clone(),
+            })
+            .tool(tools::GetTranscript {
+                rp: self.rp.clone(),
+                client: self.http_client.clone(),
+            });
 
         {
             let mut extra = serde_json::Map::new();
