@@ -42,6 +42,8 @@ sys-locale = "0.3"
 usearch = "2"
 
 sea-orm-sync = { version = "2.0.0-rc.34", default-features = false, features = ["rusqlite", "sync", "macros", "schema-sync"] }
+libsqlite3-sys = { version = "0.35", features = ["bundled"] }
+
 once_cell = "1.21.3"
 
 fastembed = { version = "5", default-features = false, features = ["hf-hub-rustls-tls", "ort-download-binaries-rustls-tls"] }
