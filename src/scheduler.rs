@@ -1,10 +1,9 @@
-use crate::agent::Agent;
-use crate::utils;
+use crate::{agent::Agent, discord};
 use anyhow::Result;
 use chrono_tz::Tz;
 use iana_time_zone::get_timezone;
 use serde::{Deserialize, Serialize};
-use serenity::all::{ChannelId, CreateAttachment, CreateMessage, Http};
+use serenity::all::Http;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -13,8 +12,6 @@ use tokio::sync::{Mutex, RwLock};
 use tokio_cron_scheduler::{Job, JobScheduler};
 use tracing::{error, info};
 use uuid::Uuid;
-
-const DISCORD_MAX_LEN: usize = 2000;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScheduledTask {
@@ -127,38 +124,11 @@ impl Scheduler {
                     .unwrap_or_else(|e| Err(anyhow::anyhow!("{}", e)))
                 {
                     Ok(response) => {
-                        if let Some(channel_id) = discord_channel_id
-                            && let Some(http) = discord_http.read().await.as_ref()
-                        {
-                            let channel = ChannelId::new(channel_id);
-
-                            for chunk in utils::split_message(&response.text, DISCORD_MAX_LEN) {
-                                if let Err(e) = channel.say(http, &chunk).await {
-                                    error!(
-                                        "Failed to send scheduled task result to Discord: {}",
-                                        e
-                                    );
-                                }
-                            }
-
-                            for file in &response.files {
-                                match CreateAttachment::path(&file.path).await {
-                                    Ok(attachment) => {
-                                        let builder = CreateMessage::new().add_file(attachment);
-                                        if let Err(e) = channel.send_message(http, builder).await {
-                                            error!(
-                                                "Failed to send scheduled file '{}': {}",
-                                                file.filename, e
-                                            );
-                                        }
-                                    }
-                                    Err(e) => {
-                                        error!(
-                                            "Failed to create attachment for '{}': {}",
-                                            file.filename, e
-                                        );
-                                    }
-                                }
+                        if let Some(channel_id) = discord_channel_id {
+                            let http = { discord_http.read().await.clone() };
+                            if let Some(http) = http {
+                                discord::send_agent_response(http.as_ref(), channel_id, &response)
+                                    .await;
                             }
                         }
                     }

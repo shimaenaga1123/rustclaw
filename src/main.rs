@@ -6,7 +6,6 @@ mod entity;
 mod memory;
 mod scheduler;
 mod tools;
-mod utils;
 mod vector_db;
 
 use anyhow::Result;

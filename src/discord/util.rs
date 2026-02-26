@@ -1,8 +1,38 @@
+use serenity::model::channel::ReactionType;
+use std::path::Path;
+
+use super::CANCEL_EMOJI;
+
+pub(super) fn cancel_emoji() -> ReactionType {
+    ReactionType::Unicode(CANCEL_EMOJI.to_string())
+}
+
+pub(super) fn sanitize_filename(name: &str) -> String {
+    name.replace(['/', '\\', '\0', ':', '*', '?', '"', '<', '>', '|'], "_")
+        .trim()
+        .chars()
+        .take(200)
+        .collect()
+}
+
+pub(super) fn deduplicate_filename(dir: &Path, filename: &str) -> String {
+    if !dir.join(filename).exists() {
+        return filename.to_string();
+    }
+
+    let ts = chrono::Utc::now().format("%Y%m%d%H%M%S");
+    let (stem, ext) = match filename.rfind('.') {
+        Some(i) => (&filename[..i], &filename[i..]),
+        None => (filename, ""),
+    };
+    format!("{}_{}{}", stem, ts, ext)
+}
+
 fn char_count_to_byte_pos(s: &str, n: usize) -> usize {
     s.char_indices().nth(n).map(|(i, _)| i).unwrap_or(s.len())
 }
 
-pub fn split_message(text: &str, max_len: usize) -> Vec<String> {
+pub(super) fn split_message(text: &str, max_len: usize) -> Vec<String> {
     if text.chars().count() <= max_len {
         return vec![text.to_string()];
     }
@@ -76,7 +106,7 @@ fn update_code_block_state(state: &mut Option<String>, text: &str) {
     }
 }
 
-pub fn split_streaming(accumulated: &str, max_len: usize) -> (String, String) {
+pub(super) fn split_streaming(accumulated: &str, max_len: usize) -> (String, String) {
     let boundary = char_count_to_byte_pos(accumulated, max_len);
     let split_at = accumulated[..boundary]
         .rfind('\n')

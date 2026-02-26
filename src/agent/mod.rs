@@ -4,7 +4,7 @@ use anyhow::Result;
 pub use attachment::{AttachmentInfo, PendingFile};
 use rig::providers::{anthropic, gemini, openai};
 use rig_agent::RigAgent;
-pub use rig_agent::{Agent, StreamEvent};
+pub use rig_agent::{Agent, AgentResponse, StreamEvent};
 use std::sync::Arc;
 pub use user_info::UserInfo;
 
