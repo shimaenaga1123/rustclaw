@@ -268,13 +268,11 @@ impl EventHandler for Handler {
             }
         };
 
-        // Add CANCEL_EMOJI reaction
         if let Err(e) = reply_msg.react(&ctx, CANCEL_EMOJI).await {
             error!("Failed to add cancel reaction: {}", e);
         }
 
         let cancelled = Arc::new(AtomicBool::new(false));
-        // Track message ID that has CANCEL_EMOJI attached
         let mut cancel_msg_id = reply_msg.id;
         self.active_streams.lock().await.insert(
             cancel_msg_id,
@@ -313,7 +311,6 @@ impl EventHandler for Handler {
 
                         match msg.channel_id.say(&ctx.http, "…").await {
                             Ok(new_msg) => {
-                                // Remove CANCEL_EMOJI from previous message and Move to new message
                                 let _ = ctx
                                     .http
                                     .delete_message_reaction_emoji(
@@ -325,8 +322,7 @@ impl EventHandler for Handler {
                                 if let Err(e) = new_msg.react(&ctx, CANCEL_EMOJI).await {
                                     error!("Failed to move cancel reaction: {}", e);
                                 }
-                                // active_streams 키를 새 메시지 ID로 교체
-                                // Replace active_streams key with new message ID
+
                                 let mut streams = self.active_streams.lock().await;
                                 if let Some(ctrl) = streams.remove(&cancel_msg_id) {
                                     cancel_msg_id = new_msg.id;
@@ -371,7 +367,6 @@ impl EventHandler for Handler {
             }
         }
 
-        // unregister stream & remove CANCEL_EMOJI reaction
         self.active_streams.lock().await.remove(&cancel_msg_id);
         let _ = ctx
             .http
@@ -461,10 +456,7 @@ impl EventHandler for Handler {
                     )
                     .await;
             }
-            Err(e) if e.is_cancelled() => {
-                // Already processed when cancelled
-            }
-            Err(e) => {
+            Err(e) if !e.is_cancelled() => {
                 error!("Task join error: {}", e);
                 let _ = reply_msg
                     .edit(
@@ -473,16 +465,15 @@ impl EventHandler for Handler {
                     )
                     .await;
             }
+            Err(_) => {}
         }
     }
 
     async fn reaction_add(&self, ctx: Context, reaction: Reaction) {
-        // process only CANCEL_EMOJI
         if reaction.emoji != Self::cancel_emoji() {
             return;
         }
 
-        // ignore bot itself reaction
         let bot_id = *self.bot_id.read().await;
         if reaction.user_id == bot_id {
             return;
@@ -500,7 +491,6 @@ impl EventHandler for Handler {
         };
 
         if !is_admin && user_id != ctrl.requester_id {
-            // Not enough permission to cancel
             let emoji = reaction.emoji.clone();
             let _ = ctx
                 .http
@@ -516,6 +506,24 @@ impl EventHandler for Handler {
         ctrl.abort_handle.abort();
     }
 
+    async fn ready(&self, ctx: Context, ready: Ready) {
+        info!("Bot connected as {}", ready.user.name);
+        *self.bot_id.write().await = Some(ready.user.id);
+        self.scheduler.set_discord_http(ctx.http.clone()).await;
+
+        if let Err(e) = serenity::model::application::Command::create_global_command(
+            &ctx.http,
+            CreateCommand::new("cancelall")
+                .description("(Admin only) Cancel all active AI response streams"),
+        )
+        .await
+        {
+            error!("Failed to register /cancelall slash command: {}", e);
+        } else {
+            info!("Registered /cancelall slash command");
+        }
+    }
+
     async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
         let Interaction::Command(cmd) = interaction else {
             return;
@@ -525,7 +533,6 @@ impl EventHandler for Handler {
             return;
         }
 
-        // for admin
         if cmd.user.id != self.owner_id {
             let response = CreateInteractionResponse::Message(
                 CreateInteractionResponseMessage::new()
@@ -551,7 +558,9 @@ impl EventHandler for Handler {
         } else {
             let count = keys.len();
             for key in keys {
-                let ctrl = streams.remove(&key).unwrap();
+                let Some(ctrl) = streams.remove(&key) else {
+                    return;
+                };
                 ctrl.cancelled.store(true, Ordering::Release);
                 ctrl.abort_handle.abort();
             }
@@ -566,24 +575,6 @@ impl EventHandler for Handler {
         );
         if let Err(e) = cmd.create_response(&ctx.http, response).await {
             error!("Failed to respond to /cancelall: {}", e);
-        }
-    }
-
-    async fn ready(&self, ctx: Context, ready: Ready) {
-        info!("Bot connected as {}", ready.user.name);
-        *self.bot_id.write().await = Some(ready.user.id);
-        self.scheduler.set_discord_http(ctx.http.clone()).await;
-
-        if let Err(e) = serenity::model::application::Command::create_global_command(
-            &ctx.http,
-            CreateCommand::new("cancelall")
-                .description("(Admin) Cancel all active AI response streams in this channel"),
-        )
-        .await
-        {
-            error!("Failed to register /cancelall slash command: {}", e);
-        } else {
-            info!("Registered /cancelall slash command");
         }
     }
 }
