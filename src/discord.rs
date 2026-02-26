@@ -5,22 +5,41 @@ use crate::{
     utils,
 };
 use anyhow::Result;
-use serenity::builder::EditMessage;
+use serenity::builder::{
+    CreateCommand, CreateInteractionResponse, CreateInteractionResponseMessage, EditMessage,
+};
 use serenity::{
     all::CreateAttachment,
     async_trait,
     builder::CreateMessage,
-    model::{channel::Message, gateway::Ready, id::UserId},
+    model::{
+        application::Interaction,
+        channel::{Message, Reaction, ReactionType},
+        gateway::Ready,
+        id::{ChannelId, MessageId, UserId},
+    },
     prelude::*,
 };
+use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
+use tokio::sync::{Mutex, mpsc};
 use tracing::{error, info, warn};
 
 const DISCORD_MAX_LEN: usize = 2000;
 const MAX_ATTACHMENT_SIZE: u32 = 25 * 1024 * 1024; // 25MB
+const CANCEL_EMOJI: char = '❌';
+
+struct StreamControl {
+    abort_handle: tokio::task::AbortHandle,
+    cancelled: Arc<AtomicBool>,
+    requester_id: UserId,
+    channel_id: ChannelId,
+}
 
 pub struct Bot {
     config: Config,
@@ -35,6 +54,7 @@ struct Handler {
     owner_id: UserId,
     scheduler: Arc<Scheduler>,
     http_client: reqwest::Client,
+    active_streams: Arc<Mutex<HashMap<MessageId, StreamControl>>>,
 }
 
 impl Handler {
@@ -160,6 +180,10 @@ impl Handler {
     fn upload_dir(&self) -> PathBuf {
         self.config.data_dir.join("workspace").join("upload")
     }
+
+    fn cancel_emoji() -> ReactionType {
+        ReactionType::Unicode(CANCEL_EMOJI.to_string())
+    }
 }
 
 fn sanitize_filename(name: &str) -> String {
@@ -239,9 +263,26 @@ impl EventHandler for Handler {
             Ok(m) => m,
             Err(e) => {
                 error!("Failed to send initial reply: {}", e);
+                handle.abort();
                 return;
             }
         };
+
+        if let Err(e) = reply_msg.react(&ctx, CANCEL_EMOJI).await {
+            error!("Failed to add cancel reaction: {}", e);
+        }
+
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let mut cancel_msg_id = reply_msg.id;
+        self.active_streams.lock().await.insert(
+            cancel_msg_id,
+            StreamControl {
+                abort_handle: handle.abort_handle(),
+                cancelled: cancelled.clone(),
+                requester_id: msg.author.id,
+                channel_id: msg.channel_id,
+            },
+        );
 
         let mut accumulated = String::new();
         let mut last_edit = Instant::now();
@@ -269,7 +310,26 @@ impl EventHandler for Handler {
                         }
 
                         match msg.channel_id.say(&ctx.http, "…").await {
-                            Ok(m) => extra_messages.push(m),
+                            Ok(new_msg) => {
+                                let _ = ctx
+                                    .http
+                                    .delete_message_reaction_emoji(
+                                        msg.channel_id,
+                                        cancel_msg_id,
+                                        &Self::cancel_emoji(),
+                                    )
+                                    .await;
+                                if let Err(e) = new_msg.react(&ctx, CANCEL_EMOJI).await {
+                                    error!("Failed to move cancel reaction: {}", e);
+                                }
+
+                                let mut streams = self.active_streams.lock().await;
+                                if let Some(ctrl) = streams.remove(&cancel_msg_id) {
+                                    cancel_msg_id = new_msg.id;
+                                    streams.insert(cancel_msg_id, ctrl);
+                                }
+                                extra_messages.push(new_msg);
+                            }
                             Err(e) => error!("Failed to send continuation message: {}", e),
                         }
                     }
@@ -305,6 +365,29 @@ impl EventHandler for Handler {
                     }
                 }
             }
+        }
+
+        self.active_streams.lock().await.remove(&cancel_msg_id);
+        let _ = ctx
+            .http
+            .delete_message_reaction_emoji(msg.channel_id, cancel_msg_id, &Self::cancel_emoji())
+            .await;
+
+        if cancelled.load(Ordering::Acquire) {
+            let target = if let Some(last) = extra_messages.last_mut() {
+                last
+            } else {
+                &mut reply_msg
+            };
+            let display = if accumulated.is_empty() {
+                "*(Cancelled)*".to_string()
+            } else {
+                format!("{}\n\n*(Cancelled)*", accumulated.trim_end())
+            };
+            let _ = target
+                .edit(&ctx, EditMessage::new().content(&display))
+                .await;
+            return;
         }
 
         if !accumulated.is_empty() {
@@ -373,7 +456,7 @@ impl EventHandler for Handler {
                     )
                     .await;
             }
-            Err(e) => {
+            Err(e) if !e.is_cancelled() => {
                 error!("Task join error: {}", e);
                 let _ = reply_msg
                     .edit(
@@ -382,13 +465,117 @@ impl EventHandler for Handler {
                     )
                     .await;
             }
+            Err(_) => {}
         }
+    }
+
+    async fn reaction_add(&self, ctx: Context, reaction: Reaction) {
+        if reaction.emoji != Self::cancel_emoji() {
+            return;
+        }
+
+        let bot_id = *self.bot_id.read().await;
+        if reaction.user_id == bot_id {
+            return;
+        }
+
+        let Some(user_id) = reaction.user_id else {
+            return;
+        };
+
+        let is_admin = user_id == self.owner_id;
+
+        let mut streams = self.active_streams.lock().await;
+        let Some(ctrl) = streams.get(&reaction.message_id) else {
+            return;
+        };
+
+        if !is_admin && user_id != ctrl.requester_id {
+            let emoji = reaction.emoji.clone();
+            let _ = ctx
+                .http
+                .delete_reaction(reaction.channel_id, reaction.message_id, user_id, &emoji)
+                .await;
+            return;
+        }
+
+        let ctrl = streams.remove(&reaction.message_id).unwrap();
+        drop(streams);
+
+        ctrl.cancelled.store(true, Ordering::Release);
+        ctrl.abort_handle.abort();
     }
 
     async fn ready(&self, ctx: Context, ready: Ready) {
         info!("Bot connected as {}", ready.user.name);
         *self.bot_id.write().await = Some(ready.user.id);
-        self.scheduler.set_discord_http(ctx.http).await;
+        self.scheduler.set_discord_http(ctx.http.clone()).await;
+
+        if let Err(e) = serenity::model::application::Command::create_global_command(
+            &ctx.http,
+            CreateCommand::new("cancelall")
+                .description("(Admin only) Cancel all active AI response streams"),
+        )
+        .await
+        {
+            error!("Failed to register /cancelall slash command: {}", e);
+        } else {
+            info!("Registered /cancelall slash command");
+        }
+    }
+
+    async fn interaction_create(&self, ctx: Context, interaction: Interaction) {
+        let Interaction::Command(cmd) = interaction else {
+            return;
+        };
+
+        if cmd.data.name != "cancelall" {
+            return;
+        }
+
+        if cmd.user.id != self.owner_id {
+            let response = CreateInteractionResponse::Message(
+                CreateInteractionResponseMessage::new()
+                    .content("You don't have permission to use this command.")
+                    .ephemeral(true),
+            );
+            if let Err(e) = cmd.create_response(&ctx.http, response).await {
+                error!("Failed to respond to /cancelall: {}", e);
+            }
+            return;
+        }
+
+        let channel_id = cmd.channel_id;
+        let mut streams = self.active_streams.lock().await;
+        let keys: Vec<MessageId> = streams
+            .iter()
+            .filter(|(_, ctrl)| ctrl.channel_id == channel_id)
+            .map(|(id, _)| *id)
+            .collect();
+
+        let reply = if keys.is_empty() {
+            "No active streams to cancel.".to_string()
+        } else {
+            let count = keys.len();
+            for key in keys {
+                let Some(ctrl) = streams.remove(&key) else {
+                    return;
+                };
+                ctrl.cancelled.store(true, Ordering::Release);
+                ctrl.abort_handle.abort();
+            }
+            format!("Cancelled {} stream(s).", count)
+        };
+        drop(streams);
+
+        let response = CreateInteractionResponse::Message(
+            CreateInteractionResponseMessage::new()
+                .content(reply)
+                .ephemeral(true),
+        );
+        if let Err(e) = cmd.create_response(&ctx.http, response).await {
+            error!("Failed to respond to /cancelall: {}", e);
+        }
     }
 }
 
@@ -408,7 +595,9 @@ impl Bot {
     pub async fn start(self) -> Result<()> {
         let intents = GatewayIntents::GUILD_MESSAGES
             | GatewayIntents::DIRECT_MESSAGES
-            | GatewayIntents::MESSAGE_CONTENT;
+            | GatewayIntents::MESSAGE_CONTENT
+            | GatewayIntents::GUILD_MESSAGE_REACTIONS
+            | GatewayIntents::DIRECT_MESSAGE_REACTIONS;
 
         let handler = Handler {
             agent: self.agent,
@@ -417,6 +606,7 @@ impl Bot {
             owner_id: UserId::new(self.config.owner_id),
             scheduler: self.scheduler,
             http_client: reqwest::Client::new(),
+            active_streams: Arc::new(Mutex::new(HashMap::new())),
         };
 
         let mut client = Client::builder(&self.config.discord_token, intents)
