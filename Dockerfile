@@ -1,23 +1,17 @@
-FROM lukemathwalker/cargo-chef:latest-rust-slim AS chef
+FROM rust:slim AS builder
 RUN apt-get update && apt-get install -y pkg-config g++ mold libssl-dev && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
-ARG BUILDKIT_INLINE_CACHE=1
 
-FROM chef AS planner
-COPY . .
-RUN cargo chef prepare --recipe-path recipe.json
-
-FROM chef AS builder
-ARG TARGETARCH
 COPY .cargo/ .cargo/
-COPY --from=planner /app/recipe.json recipe.json
-RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
-RUN cargo build --release --locked
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/app/target,sharing=locked \
+    cargo build --release --locked && \
+    cp target/release/rustclaw /app/rustclaw-bin
 
 FROM gcr.io/distroless/cc-debian13 AS runtime
-ARG TARGETARCH
-COPY --from=builder /app/target/release/rustclaw /app/
+COPY --from=builder /app/rustclaw-bin /app/rustclaw
 WORKDIR /app
 ENTRYPOINT ["/app/rustclaw"]

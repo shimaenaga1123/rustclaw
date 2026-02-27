@@ -4,7 +4,8 @@ name: build-and-push
 
 steps:
   - name: docker
-    image: plugins/docker
+    image: thegeeklab/drone-docker-buildx:24
+    privileged: true
     settings:
       repo: ghcr.io/${DRONE_REPO_OWNER}/rustclaw
       registry: ghcr.io
@@ -18,15 +19,13 @@ steps:
         - ${DRONE_TAG%%.*}
         - ${DRONE_TAG%%.*}.${DRONE_TAG#*.}
         - latest
-      auto_tag: false
-      daemon_off: false
       platforms:
         - linux/amd64
         - linux/arm64
-      build_args:
-        - BUILDKIT_INLINE_CACHE=1
-      cache_from:
-        - ghcr.io/${DRONE_REPO_OWNER}/rustclaw:latest
+      buildkit_cache:
+        type: registry
+        ref: ghcr.io/${DRONE_REPO_OWNER}/rustclaw:buildcache
+        mode: max
 
 trigger:
   event:
