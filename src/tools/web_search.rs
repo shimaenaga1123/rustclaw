@@ -3,6 +3,7 @@ use crate::config::Config;
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::sync::Arc;
 
 #[derive(Deserialize, Serialize)]
 pub struct WebSearchArgs {
@@ -17,7 +18,7 @@ fn default_count() -> i64 {
 
 #[derive(Clone)]
 pub struct WebSearch {
-    pub config: Config,
+    pub config: Arc<Config>,
     pub client: reqwest::Client,
 }
 
@@ -51,8 +52,11 @@ impl Tool for WebSearch {
     }
 
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
-        match self.config.search_provider.as_str() {
+        match self.config.search.provider.as_deref().unwrap_or_default() {
             "serper" => self.search_serper(args).await,
+            "" => Err(ToolError::SearchFailed(
+                "Search provider is not set".to_string(),
+            )),
             _ => self.search_brave(args).await,
         }
     }
@@ -62,7 +66,8 @@ impl WebSearch {
     async fn search_brave(&self, args: WebSearchArgs) -> Result<String, ToolError> {
         let api_key = self
             .config
-            .search_api_key
+            .search
+            .api_key
             .as_ref()
             .ok_or_else(|| ToolError::SearchFailed("Search API key not set".to_string()))?;
 
@@ -97,7 +102,8 @@ impl WebSearch {
     async fn search_serper(&self, args: WebSearchArgs) -> Result<String, ToolError> {
         let api_key = self
             .config
-            .search_api_key
+            .search
+            .api_key
             .as_ref()
             .ok_or_else(|| ToolError::SearchFailed("Search API key not set".to_string()))?;
 

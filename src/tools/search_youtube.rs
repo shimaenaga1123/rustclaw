@@ -1,7 +1,6 @@
 use super::error::ToolError;
 use rig::{completion::ToolDefinition, tool::Tool};
-use rustypipe::client::RustyPipe;
-use rustypipe::model::YouTubeItem;
+use rusty_ytdl::search::{SearchOptions, SearchResult, SearchType, YouTube};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::sync::Arc;
@@ -19,7 +18,7 @@ fn default_count() -> i64 {
 
 #[derive(Clone)]
 pub struct SearchYouTube {
-    pub rp: Arc<RustyPipe>,
+    pub yt: Arc<YouTube>,
 }
 
 #[derive(Debug, Serialize)]
@@ -47,7 +46,7 @@ impl Tool for SearchYouTube {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "Search YouTube videos and return metadata using rustypipe.".to_string(),
+            description: "Search YouTube videos and return metadata.".to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -69,23 +68,28 @@ impl Tool for SearchYouTube {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let count = args.count.clamp(1, 50) as usize;
 
+        let options = SearchOptions {
+            limit: count as u64,
+            search_type: SearchType::Video,
+            safe_search: false,
+        };
+
         let search_results = self
-            .rp
-            .query()
-            .search(&args.query)
+            .yt
+            .search(&args.query, Some(&options))
             .await
             .map_err(|e| ToolError::SearchFailed(format!("YouTube search failed: {}", e)))?;
 
         let mut results = Vec::with_capacity(count);
-        for item in &search_results.items.items {
-            if let YouTubeItem::Video(video) = item {
-                let thumbnail = video.thumbnail.first().map(|t| t.url.to_string());
+        for item in &search_results {
+            if let SearchResult::Video(video) = item {
+                let thumbnail = video.thumbnails.first().map(|t| t.url.clone());
 
-                let duration = video.duration.unwrap_or_default();
-                let duration_str = if duration > 0 {
-                    let h = duration / 3600;
-                    let m = (duration % 3600) / 60;
-                    let s = duration % 60;
+                let duration_secs = video.duration;
+                let duration_str = if duration_secs > 0 {
+                    let h = duration_secs / 3600;
+                    let m = (duration_secs % 3600) / 60;
+                    let s = duration_secs % 60;
                     if h > 0 {
                         Some(format!("{}:{:02}:{:02}", h, m, s))
                     } else {
@@ -97,16 +101,24 @@ impl Tool for SearchYouTube {
 
                 results.push(SearchVideoResult {
                     video_id: video.id.clone(),
-                    title: normalize_ws(&video.name),
-                    channel: video.channel.as_ref().map(|c| normalize_ws(&c.name)),
-                    channel_id: video.channel.as_ref().map(|c| c.id.clone()),
+                    title: normalize_ws(&video.title),
+                    channel: Some(normalize_ws(&video.channel.name)),
+                    channel_id: Some(video.channel.id.clone()),
                     duration: duration_str,
-                    description: video.short_description.clone(),
+                    description: if video.description.is_empty() {
+                        None
+                    } else {
+                        Some(video.description.clone())
+                    },
                     thumbnail,
-                    views: video.view_count,
-                    length_seconds: video.duration,
-                    is_live: video.is_live,
-                    is_short: video.is_short,
+                    views: Some(video.views),
+                    length_seconds: if duration_secs > 0 {
+                        Some(duration_secs as u32)
+                    } else {
+                        None
+                    },
+                    is_live: false,
+                    is_short: false,
                 });
             }
             if results.len() >= count {

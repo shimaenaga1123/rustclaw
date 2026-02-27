@@ -25,12 +25,12 @@ async fn main() -> Result<()> {
 
     let embedding_service = embeddings::create_embedding_service(config.clone()).await?;
 
-    let vector_db = vector_db::VectorDb::new(&config.data_dir, embedding_service).await?;
+    let vector_db = vector_db::VectorDb::new(&config.storage.data_dir, embedding_service).await?;
     let memory_manager = memory::MemoryManager::new(vector_db.clone()).await?;
 
     let agent = agent::create_agent(config.clone(), memory_manager.clone()).await?;
 
-    let scheduler = scheduler::Scheduler::new(&config.data_dir, agent.clone()).await?;
+    let scheduler = scheduler::Scheduler::new(&config.storage.data_dir, agent.clone()).await?;
     agent.set_scheduler(scheduler.clone()).await;
     scheduler.start().await?;
 

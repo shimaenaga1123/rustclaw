@@ -12,7 +12,7 @@ use rig::{
     completion::{CompletionModel, GetTokenUsage},
     streaming::{StreamedAssistantContent, StreamingPrompt},
 };
-use rustypipe::client::RustyPipe;
+use rusty_ytdl::search::YouTube;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 
@@ -23,15 +23,15 @@ pub enum StreamEvent {
     Error(String),
 }
 
-struct StreamParams<'a> {
-    model: &'a str,
-    preamble: &'a str,
-    prompt: &'a str,
+struct StreamParams {
+    model: String,
+    preamble: String,
+    prompt: String,
     disable_reasoning: bool,
     is_owner: bool,
     discord_channel_id: Option<u64>,
-    config: &'a Config,
-    memory: &'a Arc<MemoryManager>,
+    config: Arc<Config>,
+    memory: Arc<MemoryManager>,
     scheduler: Option<Arc<Scheduler>>,
     pending_files: Arc<RwLock<Vec<PendingFile>>>,
     tx: mpsc::Sender<StreamEvent>,
@@ -62,7 +62,7 @@ pub struct RigAgent<C: CompletionClient> {
     memory: Arc<MemoryManager>,
     scheduler: RwLock<Option<Arc<Scheduler>>>,
     http_client: reqwest::Client,
-    rp: Arc<RustyPipe>,
+    yt: Arc<YouTube>,
     client: C,
 }
 
@@ -73,12 +73,12 @@ impl<C: CompletionClient> RigAgent<C> {
             memory,
             scheduler: RwLock::new(None),
             http_client: reqwest::Client::new(),
-            rp: Arc::new(RustyPipe::new()),
+            yt: Arc::new(YouTube::new()?),
             client,
         }))
     }
 
-    async fn stream_prompt(&self, params: StreamParams<'_>) -> Result<String>
+    async fn stream_prompt(&self, params: StreamParams) -> Result<String>
     where
         <C as CompletionClient>::CompletionModel: 'static,
     {
@@ -87,7 +87,7 @@ impl<C: CompletionClient> RigAgent<C> {
         let mut builder = self
             .client
             .agent(params.model)
-            .preamble(params.preamble)
+            .preamble(params.preamble.as_str())
             .tool(tools::RunCommand {
                 config: params.config.clone(),
             })
@@ -109,10 +109,9 @@ impl<C: CompletionClient> RigAgent<C> {
                 client: self.http_client.clone(),
             })
             .tool(tools::SearchYouTube {
-                rp: self.rp.clone(),
+                yt: self.yt.clone(),
             })
             .tool(tools::GetTranscript {
-                rp: self.rp.clone(),
                 client: self.http_client.clone(),
             });
 
@@ -140,20 +139,20 @@ impl<C: CompletionClient> RigAgent<C> {
                 });
         }
 
-        if params.config.fetch_provider == "jina" {
+        if params.config.fetch.provider == "jina" {
             builder = builder.tool(tools::WebFetch {
-                config: params.config.clone(),
+                config: params.config.as_ref().clone(),
                 client: self.http_client.clone(),
             });
         }
 
-        if params.config.search_api_key.is_some() {
+        if params.config.search.api_key.is_some() {
             builder = builder.tool(tools::WebSearch {
                 config: params.config.clone(),
                 client: self.http_client.clone(),
             });
 
-            if params.config.search_provider == "serper" {
+            if params.config.search.provider.as_deref().unwrap_or("") == "serper" {
                 builder = builder.tool(tools::WebNews {
                     config: params.config.clone(),
                     client: self.http_client.clone(),
@@ -181,7 +180,7 @@ impl<C: CompletionClient> RigAgent<C> {
 
         Self::run_stream(
             builder.default_max_turns(50).build(),
-            params.prompt,
+            params.prompt.as_str(),
             params.tx,
         )
         .await
@@ -280,22 +279,23 @@ where
         let preamble = build_preamble(
             is_owner,
             scheduler_ref.is_some(),
-            self.config.search_api_key.is_some(),
-            self.config.search_api_key.is_some() && self.config.search_provider == "serper",
-            self.config.fetch_provider == "jina",
+            self.config.search.api_key.is_some(),
+            self.config.search.api_key.is_some()
+                && self.config.search.provider.as_deref().unwrap_or("") == "serper",
+            self.config.fetch.provider == "jina",
         );
         let pending_files = Arc::new(RwLock::new(Vec::new()));
 
         let response = self
             .stream_prompt(StreamParams {
-                model: &self.config.model,
-                preamble: &preamble,
-                prompt: &full_prompt,
-                disable_reasoning: self.config.disable_reasoning,
+                model: self.config.api.model.clone(),
+                preamble,
+                prompt: full_prompt,
+                disable_reasoning: self.config.model.disable_reasoning,
                 is_owner,
                 discord_channel_id,
-                config: &self.config,
-                memory: &self.memory,
+                config: Arc::new(self.config.clone()),
+                memory: self.memory.clone(),
                 scheduler: scheduler_ref,
                 pending_files: pending_files.clone(),
                 tx,

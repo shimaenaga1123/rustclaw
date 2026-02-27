@@ -19,11 +19,11 @@ pub struct TypstRenderArgs {
 #[derive(Clone)]
 pub struct TypstRender {
     pub pending_files: Arc<RwLock<Vec<PendingFile>>>,
-    pub config: Config,
+    pub config: Arc<Config>,
 }
 
 impl TypstRender {
-    async fn exec_in_container(config: &Config, command: &str) -> Result<String, ToolError> {
+    async fn exec_in_container(config: Arc<Config>, command: &str) -> Result<String, ToolError> {
         let runner = RunCommand {
             config: config.clone(),
         };
@@ -81,10 +81,10 @@ impl Tool for TypstRender {
 
         let escaped = wrapped.replace('\\', "\\\\").replace('\'', "'\\''");
         let write_cmd = format!("printf '%s' '{}' > {}", escaped, src_path);
-        Self::exec_in_container(&self.config, &write_cmd).await?;
+        Self::exec_in_container(self.config.clone(), &write_cmd).await?;
 
         Self::exec_in_container(
-            &self.config,
+            self.config.clone(),
             "command -v typst >/dev/null 2>&1 || \
              (apt-get update -qq && apt-get install -y -qq wget >/dev/null 2>&1 && \
               wget -qO /tmp/typst.tar.xz https://github.com/typst/typst/releases/latest/download/typst-x86_64-unknown-linux-musl.tar.xz && \
@@ -94,12 +94,12 @@ impl Tool for TypstRender {
         ).await?;
 
         let compile_cmd = format!("typst compile --ppi 288 {} {}", src_path, out_path);
-        Self::exec_in_container(&self.config, &compile_cmd)
+        Self::exec_in_container(self.config.clone(), &compile_cmd)
             .await
             .map_err(|e| ToolError::CommandFailed(format!("Typst compilation failed: {}", e)))?;
 
         let cleanup = format!("rm -f {}", src_path);
-        let _ = Self::exec_in_container(&self.config, &cleanup).await;
+        let _ = Self::exec_in_container(self.config.clone(), &cleanup).await;
 
         let filename = format!("{}.png", args.filename.as_deref().unwrap_or("render"));
         let workspace = RunCommand::workspace_path(&self.config);

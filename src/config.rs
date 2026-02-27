@@ -3,91 +3,94 @@ use serde::Deserialize;
 use std::path::PathBuf;
 
 #[derive(Debug, Clone, Deserialize)]
-struct ConfigFile {
-    discord: DiscordConfig,
-    api: ApiConfig,
-    search: SearchConfig,
-    fetch: FetchConfig,
-    storage: StorageConfig,
-    commands: CommandsConfig,
-    model: ModelConfig,
+pub struct Config {
+    pub discord: DiscordConfig,
+    pub api: ApiConfig,
+    pub search: SearchConfig,
     #[serde(default)]
-    embedding: EmbeddingConfig,
+    pub fetch: FetchConfig,
+    #[serde(default)]
+    pub storage: StorageConfig,
+    #[serde(default)]
+    pub commands: CommandsConfig,
+    #[serde(default)]
+    pub model: ModelConfig,
+    #[serde(default)]
+    pub embedding: EmbeddingConfig,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct DiscordConfig {
-    token: String,
-    owner_id: u64,
+pub struct DiscordConfig {
+    pub token: String,
+    pub owner_id: u64,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct ApiConfig {
-    provider: String,
-    key: String,
-    url: String,
-    model: String,
+pub struct ApiConfig {
+    pub provider: String,
+    pub key: String,
+    pub url: Option<String>,
+    pub model: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
-struct SearchConfig {
-    provider: String,
-    api_key: Option<String>,
+pub struct SearchConfig {
+    pub provider: Option<String>,
+    pub api_key: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-struct FetchConfig {
-    provider: String,
-    api_key: Option<String>,
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct FetchConfig {
+    #[serde(default = "default_fetch_provider")]
+    pub provider: String,
+    pub api_key: Option<String>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-struct StorageConfig {
-    data_dir: String,
+fn default_fetch_provider() -> String {
+    "jina".to_string()
 }
 
-#[derive(Debug, Clone, Deserialize)]
-struct CommandsConfig {
-    timeout: u64,
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct StorageConfig {
+    #[serde(default = "default_data_dir")]
+    pub data_dir: PathBuf,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-struct ModelConfig {
-    disable_reasoning: bool,
+fn default_data_dir() -> PathBuf {
+    PathBuf::from("data")
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct CommandsConfig {
+    #[serde(default = "default_timeout")]
+    pub timeout: u64,
+}
+
+fn default_timeout() -> u64 {
+    30
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct ModelConfig {
+    #[serde(default = "default_disable_reasoning")]
+    pub disable_reasoning: bool,
+}
+
+fn default_disable_reasoning() -> bool {
+    false
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct EmbeddingConfig {
+    #[serde(default = "default_embedding_provider")]
+    pub provider: String,
+    pub api_key: Option<String>,
+    pub model: Option<String>,
+    pub dimensions: Option<usize>,
 }
 
 fn default_embedding_provider() -> String {
     "local".to_string()
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-struct EmbeddingConfig {
-    #[serde(default = "default_embedding_provider")]
-    provider: String,
-    api_key: Option<String>,
-    model: Option<String>,
-    dimensions: Option<usize>,
-}
-
-#[derive(Debug, Clone)]
-pub struct Config {
-    pub discord_token: String,
-    pub owner_id: u64,
-    pub api_provider: String,
-    pub api_key: String,
-    pub api_url: String,
-    pub model: String,
-    pub search_provider: String,
-    pub search_api_key: Option<String>,
-    pub fetch_provider: String,
-    pub fetch_api_key: Option<String>,
-    pub data_dir: PathBuf,
-    pub command_timeout: u64,
-    pub disable_reasoning: bool,
-    pub embedding_provider: String,
-    pub embedding_api_key: Option<String>,
-    pub embedding_model: Option<String>,
-    pub embedding_dimensions: Option<usize>,
 }
 
 impl Config {
@@ -95,28 +98,9 @@ impl Config {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read config file: {}", path))?;
 
-        let config_file: ConfigFile =
-            toml::from_str(&content).context("Failed to parse config file")?;
+        let config: Config = toml::from_str(&content).context("Failed to parse config file")?;
 
-        Ok(Self {
-            discord_token: config_file.discord.token,
-            owner_id: config_file.discord.owner_id,
-            api_provider: config_file.api.provider,
-            api_key: config_file.api.key,
-            api_url: config_file.api.url,
-            model: config_file.api.model,
-            search_provider: config_file.search.provider,
-            search_api_key: config_file.search.api_key,
-            fetch_provider: config_file.fetch.provider,
-            fetch_api_key: config_file.fetch.api_key,
-            data_dir: config_file.storage.data_dir.into(),
-            command_timeout: config_file.commands.timeout,
-            disable_reasoning: config_file.model.disable_reasoning,
-            embedding_provider: config_file.embedding.provider,
-            embedding_api_key: config_file.embedding.api_key,
-            embedding_model: config_file.embedding.model,
-            embedding_dimensions: config_file.embedding.dimensions,
-        })
+        Ok(config)
     }
 
     pub fn load() -> Result<Self> {

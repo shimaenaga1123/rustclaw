@@ -52,7 +52,8 @@ impl WebFetch {
     async fn fetch_jina(&self, args: WebFetchArgs) -> Result<String, ToolError> {
         let api_key = self
             .config
-            .fetch_api_key
+            .fetch
+            .api_key
             .as_ref()
             .ok_or_else(|| ToolError::FetchFailed("Fetch API key not set".to_string()))?;
 
@@ -94,7 +95,7 @@ impl WebFetch {
             .map_err(|e| ToolError::FetchFailed(e.to_string()))?;
 
         if !response.status().is_success() {
-            return if self.config.fetch_api_key.is_some() {
+            return if self.config.fetch.api_key.is_some() {
                 self.fetch_jina(args).await
             } else {
                 Err(ToolError::FetchFailed(format!(
