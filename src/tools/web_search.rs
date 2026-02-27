@@ -3,6 +3,7 @@ use crate::config::Config;
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::sync::Arc;
 
 #[derive(Deserialize, Serialize)]
 pub struct WebSearchArgs {
@@ -17,7 +18,7 @@ fn default_count() -> i64 {
 
 #[derive(Clone)]
 pub struct WebSearch {
-    pub config: Config,
+    pub config: Arc<Config>,
     pub client: reqwest::Client,
 }
 

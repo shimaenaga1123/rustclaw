@@ -14,6 +14,7 @@ use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
@@ -30,7 +31,7 @@ pub struct RunCommandArgs {
 
 #[derive(Clone)]
 pub struct RunCommand {
-    pub config: Config,
+    pub config: Arc<Config>,
 }
 
 impl RunCommand {
@@ -273,7 +274,7 @@ pub struct ResetContainerArgs {}
 
 #[derive(Clone)]
 pub struct ResetContainer {
-    pub config: Config,
+    pub config: Arc<Config>,
 }
 
 impl Tool for ResetContainer {

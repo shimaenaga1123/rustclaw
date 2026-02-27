@@ -20,7 +20,7 @@ pub struct SendFileArgs {
 #[derive(Clone)]
 pub struct SendFile {
     pub pending_files: Arc<RwLock<Vec<PendingFile>>>,
-    pub config: Config,
+    pub config: Arc<Config>,
 }
 
 impl Tool for SendFile {

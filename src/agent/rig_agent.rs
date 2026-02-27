@@ -23,15 +23,15 @@ pub enum StreamEvent {
     Error(String),
 }
 
-struct StreamParams<'a> {
-    model: &'a str,
-    preamble: &'a str,
-    prompt: &'a str,
+struct StreamParams {
+    model: String,
+    preamble: String,
+    prompt: String,
     disable_reasoning: bool,
     is_owner: bool,
     discord_channel_id: Option<u64>,
-    config: &'a Config,
-    memory: &'a Arc<MemoryManager>,
+    config: Arc<Config>,
+    memory: Arc<MemoryManager>,
     scheduler: Option<Arc<Scheduler>>,
     pending_files: Arc<RwLock<Vec<PendingFile>>>,
     tx: mpsc::Sender<StreamEvent>,
@@ -78,7 +78,7 @@ impl<C: CompletionClient> RigAgent<C> {
         }))
     }
 
-    async fn stream_prompt(&self, params: StreamParams<'_>) -> Result<String>
+    async fn stream_prompt(&self, params: StreamParams) -> Result<String>
     where
         <C as CompletionClient>::CompletionModel: 'static,
     {
@@ -87,7 +87,7 @@ impl<C: CompletionClient> RigAgent<C> {
         let mut builder = self
             .client
             .agent(params.model)
-            .preamble(params.preamble)
+            .preamble(params.preamble.as_str())
             .tool(tools::RunCommand {
                 config: params.config.clone(),
             })
@@ -174,7 +174,7 @@ impl<C: CompletionClient> RigAgent<C> {
 
         Self::run_stream(
             builder.default_max_turns(50).build(),
-            params.prompt,
+            params.prompt.as_str(),
             params.tx,
         )
         .await
@@ -280,14 +280,14 @@ where
 
         let response = self
             .stream_prompt(StreamParams {
-                model: &self.config.model,
-                preamble: &preamble,
-                prompt: &full_prompt,
+                model: self.config.model.clone(),
+                preamble,
+                prompt: full_prompt,
                 disable_reasoning: self.config.disable_reasoning,
                 is_owner,
                 discord_channel_id,
-                config: &self.config,
-                memory: &self.memory,
+                config: Arc::new(self.config.clone()),
+                memory: self.memory.clone(),
                 scheduler: scheduler_ref,
                 pending_files: pending_files.clone(),
                 tx,

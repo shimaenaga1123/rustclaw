@@ -3,6 +3,7 @@ use crate::config::Config;
 use rig::{completion::ToolDefinition, tool::Tool};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use std::sync::Arc;
 
 #[derive(Deserialize, Serialize)]
 pub struct WebNewsArgs {
@@ -11,7 +12,7 @@ pub struct WebNewsArgs {
 
 #[derive(Clone)]
 pub struct WebNews {
-    pub config: Config,
+    pub config: Arc<Config>,
     pub client: reqwest::Client,
 }
 
