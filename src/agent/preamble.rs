@@ -26,6 +26,7 @@ pub fn build_preamble(
     has_scheduler: bool,
     has_web_search: bool,
     has_web_news: bool,
+    has_web_fetch: bool,
 ) -> String {
     let now = chrono::Local::now();
     let mut preamble = String::with_capacity(2600);
@@ -69,6 +70,10 @@ pub fn build_preamble(
             preamble
                 .push_str("- **web_news**: Search for recent news articles (Serper provider).\n");
         }
+    }
+    if has_web_fetch {
+        preamble
+            .push_str("- **web_fetch**: Fetch a URL and get its content in LLM-friendly format.\n");
     }
     preamble.push_str("- **weather**: Get current weather and forecast for a location.\n");
     if has_scheduler {

@@ -21,6 +21,13 @@ provider = "brave"
 # API key for the selected provider
 # api_key = "your_search_api_key_here"
 
+[fetch]
+# Fetch provider: "jina"
+provider = "jina"
+# (Optional) API key for the provider
+# If API key is not set, There will be rate-limit for jina.ai
+# api_key = "your_fetch_api_key_here"
+
 [storage]
 data_dir = "data"
 

@@ -139,6 +139,13 @@ impl<C: CompletionClient> RigAgent<C> {
                 });
         }
 
+        if params.config.fetch.provider == "jina" {
+            builder = builder.tool(tools::WebFetch {
+                config: params.config.as_ref().clone(),
+                client: self.http_client.clone(),
+            });
+        }
+
         if params.config.search.api_key.is_some() {
             builder = builder.tool(tools::WebSearch {
                 config: params.config.clone(),
@@ -275,6 +282,7 @@ where
             self.config.search.api_key.is_some(),
             self.config.search.api_key.is_some()
                 && self.config.search.provider.as_deref().unwrap_or("") == "serper",
+            self.config.fetch.provider == "jina",
         );
         let pending_files = Arc::new(RwLock::new(Vec::new()));
 

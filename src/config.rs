@@ -8,9 +8,12 @@ pub struct Config {
     pub api: ApiConfig,
     pub search: SearchConfig,
     #[serde(default)]
+    pub fetch: FetchConfig,
+    #[serde(default)]
     pub storage: StorageConfig,
     #[serde(default)]
     pub commands: CommandsConfig,
+    #[serde(default)]
     pub model: ModelConfig,
     #[serde(default)]
     pub embedding: EmbeddingConfig,
@@ -34,6 +37,17 @@ pub struct ApiConfig {
 pub struct SearchConfig {
     pub provider: Option<String>,
     pub api_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Default)]
+pub struct FetchConfig {
+    #[serde(default = "default_fetch_provider")]
+    pub provider: String,
+    pub api_key: Option<String>,
+}
+
+fn default_fetch_provider() -> String {
+    "jina".to_string()
 }
 
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -84,10 +98,9 @@ impl Config {
         let content = std::fs::read_to_string(path)
             .with_context(|| format!("Failed to read config file: {}", path))?;
 
-        let config_file: Config =
-            toml::from_str(&content).context("Failed to parse config file")?;
+        let config: Config = toml::from_str(&content).context("Failed to parse config file")?;
 
-        Ok(config_file)
+        Ok(config)
     }
 
     pub fn load() -> Result<Self> {

@@ -8,6 +8,7 @@ mod search_youtube;
 mod send_file;
 mod typst_render;
 mod weather;
+mod web_fetch;
 mod web_news;
 mod web_search;
 
@@ -20,5 +21,6 @@ pub use search_youtube::SearchYouTube;
 pub use send_file::SendFile;
 pub use typst_render::TypstRender;
 pub use weather::Weather;
+pub use web_fetch::WebFetch;
 pub use web_news::WebNews;
 pub use web_search::WebSearch;
