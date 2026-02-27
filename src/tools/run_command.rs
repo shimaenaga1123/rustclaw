@@ -36,7 +36,7 @@ pub struct RunCommand {
 
 impl RunCommand {
     pub fn workspace_path(config: &Config) -> PathBuf {
-        config.data_dir.join("workspace")
+        config.storage.data_dir.join("workspace")
     }
 
     async fn ensure_image(docker: &Docker) -> Result<(), ToolError> {
@@ -177,7 +177,7 @@ impl RunCommand {
 
         let exec_id = exec.id.clone();
 
-        match tokio::time::timeout(Duration::from_secs(self.config.command_timeout), async {
+        match tokio::time::timeout(Duration::from_secs(self.config.commands.timeout), async {
             let start_result = docker
                 .start_exec(&exec.id, None)
                 .await
@@ -229,7 +229,7 @@ impl RunCommand {
             Err(_) => {
                 warn!(
                     "Command execution timed out after {}s",
-                    self.config.command_timeout
+                    self.config.commands.timeout
                 );
                 Err(ToolError::Timeout)
             }

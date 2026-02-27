@@ -140,13 +140,13 @@ impl<C: CompletionClient> RigAgent<C> {
                 });
         }
 
-        if params.config.search_api_key.is_some() {
+        if params.config.search.api_key.is_some() {
             builder = builder.tool(tools::WebSearch {
                 config: params.config.clone(),
                 client: self.http_client.clone(),
             });
 
-            if params.config.search_provider == "serper" {
+            if params.config.search.provider.as_deref().unwrap_or("") == "serper" {
                 builder = builder.tool(tools::WebNews {
                     config: params.config.clone(),
                     client: self.http_client.clone(),
@@ -273,17 +273,18 @@ where
         let preamble = build_preamble(
             is_owner,
             scheduler_ref.is_some(),
-            self.config.search_api_key.is_some(),
-            self.config.search_api_key.is_some() && self.config.search_provider == "serper",
+            self.config.search.api_key.is_some(),
+            self.config.search.api_key.is_some()
+                && self.config.search.provider.as_deref().unwrap_or("") == "serper",
         );
         let pending_files = Arc::new(RwLock::new(Vec::new()));
 
         let response = self
             .stream_prompt(StreamParams {
-                model: self.config.model.clone(),
+                model: self.config.api.model.clone(),
                 preamble,
                 prompt: full_prompt,
-                disable_reasoning: self.config.disable_reasoning,
+                disable_reasoning: self.config.model.disable_reasoning,
                 is_owner,
                 discord_channel_id,
                 config: Arc::new(self.config.clone()),

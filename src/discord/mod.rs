@@ -51,13 +51,13 @@ impl Bot {
             agent: self.agent,
             config: self.config.clone(),
             bot_id: Arc::new(RwLock::new(None)),
-            owner_id: UserId::new(self.config.owner_id),
+            owner_id: UserId::new(self.config.discord.owner_id),
             scheduler: self.scheduler,
             http_client: reqwest::Client::new(),
             active_streams: Arc::new(Mutex::new(HashMap::new())),
         };
 
-        let mut client = Client::builder(&self.config.discord_token, intents)
+        let mut client = Client::builder(&self.config.discord.token, intents)
             .event_handler(handler)
             .await?;
 

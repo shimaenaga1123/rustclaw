@@ -43,7 +43,8 @@ impl Tool for WebNews {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let api_key = self
             .config
-            .search_api_key
+            .search
+            .api_key
             .as_ref()
             .ok_or_else(|| ToolError::SearchFailed("Search API key not set".to_string()))?;
 

@@ -14,24 +14,24 @@ mod rig_agent;
 mod user_info;
 
 pub async fn create_agent(config: Config, memory: Arc<MemoryManager>) -> Result<Arc<dyn Agent>> {
-    match config.api_provider.as_str() {
+    match config.api.provider.as_str() {
         "openai" => {
             let client: openai::CompletionsClient = openai::CompletionsClient::builder()
-                .api_key(&config.api_key)
-                .base_url(&config.api_url)
+                .api_key(&config.api.key)
+                .base_url(config.api.url.as_deref().unwrap_or(""))
                 .build()?;
             let agent = RigAgent::new(config, memory, client).await?;
             Ok(agent as Arc<dyn Agent>)
         }
         "gemini" => {
-            let client = gemini::Client::new(&config.api_key)?;
+            let client = gemini::Client::new(&config.api.key)?;
             let agent = RigAgent::new(config, memory, client).await?;
             Ok(agent as Arc<dyn Agent>)
         }
         _ => {
             let client: anthropic::Client = anthropic::Client::builder()
-                .api_key(&config.api_key)
-                .base_url(&config.api_url)
+                .api_key(&config.api.key)
+                .base_url(config.api.url.as_deref().unwrap_or(""))
                 .build()?;
             let agent = RigAgent::new(config, memory, client).await?;
             Ok(agent as Arc<dyn Agent>)

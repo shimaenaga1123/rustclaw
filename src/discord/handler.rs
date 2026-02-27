@@ -201,7 +201,11 @@ impl Handler {
     }
 
     fn upload_dir(&self) -> PathBuf {
-        self.config.data_dir.join("workspace").join("upload")
+        self.config
+            .storage
+            .data_dir
+            .join("workspace")
+            .join("upload")
     }
 
     fn extract_content(msg: &Message, bot_id: UserId) -> String {
