@@ -7,6 +7,7 @@ struct ConfigFile {
     discord: DiscordConfig,
     api: ApiConfig,
     search: SearchConfig,
+    fetch: FetchConfig,
     storage: StorageConfig,
     commands: CommandsConfig,
     model: ModelConfig,
@@ -30,6 +31,12 @@ struct ApiConfig {
 
 #[derive(Debug, Clone, Deserialize)]
 struct SearchConfig {
+    provider: String,
+    api_key: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct FetchConfig {
     provider: String,
     api_key: Option<String>,
 }
@@ -72,6 +79,8 @@ pub struct Config {
     pub model: String,
     pub search_provider: String,
     pub search_api_key: Option<String>,
+    pub fetch_provider: String,
+    pub fetch_api_key: Option<String>,
     pub data_dir: PathBuf,
     pub command_timeout: u64,
     pub disable_reasoning: bool,
@@ -98,6 +107,8 @@ impl Config {
             model: config_file.api.model,
             search_provider: config_file.search.provider,
             search_api_key: config_file.search.api_key,
+            fetch_provider: config_file.fetch.provider,
+            fetch_api_key: config_file.fetch.api_key,
             data_dir: config_file.storage.data_dir.into(),
             command_timeout: config_file.commands.timeout,
             disable_reasoning: config_file.model.disable_reasoning,
