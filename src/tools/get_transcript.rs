@@ -2,10 +2,8 @@ use super::error::ToolError;
 use quick_xml::events::Event;
 use quick_xml::reader::Reader;
 use rig::{completion::ToolDefinition, tool::Tool};
-use rustypipe::client::RustyPipe;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
-use std::sync::Arc;
 
 #[derive(Deserialize, Serialize)]
 pub struct GetTranscriptArgs {
@@ -23,7 +21,6 @@ fn default_max_chars() -> i64 {
 
 #[derive(Clone)]
 pub struct GetTranscript {
-    pub rp: Arc<RustyPipe>,
     pub client: reqwest::Client,
 }
 
@@ -32,6 +29,39 @@ struct TranscriptSegment {
     start_seconds: f64,
     duration_seconds: f64,
     text: String,
+}
+
+#[derive(Deserialize)]
+struct PlayerResponse {
+    #[serde(rename = "videoDetails")]
+    video_details: Option<PlayerVideoDetails>,
+    captions: Option<PlayerCaptions>,
+}
+
+#[derive(Deserialize)]
+struct PlayerVideoDetails {
+    title: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct PlayerCaptions {
+    #[serde(rename = "playerCaptionsTracklistRenderer")]
+    renderer: Option<CaptionRenderer>,
+}
+
+#[derive(Deserialize)]
+struct CaptionRenderer {
+    #[serde(rename = "captionTracks")]
+    caption_tracks: Option<Vec<CaptionTrack>>,
+}
+
+#[derive(Deserialize)]
+struct CaptionTrack {
+    #[serde(rename = "baseUrl")]
+    base_url: String,
+    #[serde(rename = "languageCode")]
+    language_code: String,
+    kind: Option<String>,
 }
 
 impl Tool for GetTranscript {
@@ -45,8 +75,8 @@ impl Tool for GetTranscript {
         ToolDefinition {
             name: Self::NAME.to_string(),
             description:
-            "Fetch a YouTube transcript. Uses rustypipe for video metadata and subtitle retrieval."
-                .to_string(),
+                "Fetch a YouTube transcript. Retrieves video metadata and subtitle tracks directly from YouTube."
+                    .to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
@@ -77,22 +107,42 @@ impl Tool for GetTranscript {
     async fn call(&self, args: Self::Args) -> Result<Self::Output, Self::Error> {
         let video_id = extract_video_id(&args.video_id_or_url);
 
-        let details = self
-            .rp
-            .query()
-            .video_details(&video_id)
+        let player_resp = self
+            .client
+            .post("https://www.youtube.com/youtubei/v1/player")
+            .query(&[("key", "AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8")])
+            .json(&json!({
+                "videoId": video_id,
+                "context": {
+                    "client": {
+                        "clientName": "WEB",
+                        "clientVersion": "2.20231021.09.00",
+                        "hl": "en",
+                        "gl": "US"
+                    }
+                }
+            }))
+            .send()
+            .await
+            .map_err(|e| ToolError::SearchFailed(format!("Failed to fetch player data: {}", e)))?
+            .json::<PlayerResponse>()
             .await
             .map_err(|e| {
-                ToolError::SearchFailed(format!("Failed to fetch video details: {}", e))
-            })?;
-        let video_title = details.name.clone();
-
-        let player =
-            self.rp.query().player(&video_id).await.map_err(|e| {
-                ToolError::SearchFailed(format!("Failed to fetch player data: {}", e))
+                ToolError::SearchFailed(format!("Failed to parse player response: {}", e))
             })?;
 
-        if player.subtitles.is_empty() {
+        let video_title = player_resp
+            .video_details
+            .and_then(|d| d.title)
+            .unwrap_or_else(|| video_id.clone());
+
+        let caption_tracks = player_resp
+            .captions
+            .and_then(|c| c.renderer)
+            .and_then(|r| r.caption_tracks)
+            .unwrap_or_default();
+
+        if caption_tracks.is_empty() {
             return Err(ToolError::SearchFailed(format!(
                 "No subtitles available for video {}",
                 video_id
@@ -101,7 +151,7 @@ impl Tool for GetTranscript {
 
         let preferred = preferred_languages(args.lang.as_deref());
         let (track, is_auto) =
-            select_subtitle_track(&player.subtitles, &preferred).ok_or_else(|| {
+            select_subtitle_track(&caption_tracks, &preferred).ok_or_else(|| {
                 ToolError::SearchFailed(format!(
                     "No matching subtitle track found for video {}",
                     video_id
@@ -110,7 +160,7 @@ impl Tool for GetTranscript {
 
         let body = self
             .client
-            .get(track.url.as_str())
+            .get(&track.base_url)
             .send()
             .await
             .map_err(|e| ToolError::SearchFailed(format!("Failed to fetch subtitle data: {}", e)))?
@@ -148,7 +198,7 @@ impl Tool for GetTranscript {
         let mut output = json!({
             "video_id": video_id,
             "title": video_title,
-            "language": track.lang.to_string(),
+            "language": track.language_code,
             "is_auto_generated": is_auto,
             "segment_count": segments.len(),
             "char_count": text.chars().count(),
@@ -176,24 +226,26 @@ fn extract_video_id(input: &str) -> String {
 }
 
 fn select_subtitle_track<'a>(
-    subtitles: &'a [rustypipe::model::Subtitle],
+    tracks: &'a [CaptionTrack],
     preferred: &[String],
-) -> Option<(&'a rustypipe::model::Subtitle, bool)> {
+) -> Option<(&'a CaptionTrack, bool)> {
+    let is_auto = |t: &CaptionTrack| t.kind.as_deref() == Some("asr");
+
     for lang in preferred {
-        for sub in subtitles {
-            if sub.lang.as_str().starts_with(lang.as_str()) && !sub.auto_generated {
-                return Some((sub, false));
+        for track in tracks {
+            if track.language_code.starts_with(lang.as_str()) && !is_auto(track) {
+                return Some((track, false));
             }
         }
     }
     for lang in preferred {
-        for sub in subtitles {
-            if sub.lang.as_str().starts_with(lang.as_str()) && sub.auto_generated {
-                return Some((sub, true));
+        for track in tracks {
+            if track.language_code.starts_with(lang.as_str()) && is_auto(track) {
+                return Some((track, true));
             }
         }
     }
-    subtitles.first().map(|s| (s, s.auto_generated))
+    tracks.first().map(|t| (t, is_auto(t)))
 }
 
 fn parse_subtitle_xml(xml: &str) -> Result<Vec<TranscriptSegment>, ToolError> {
@@ -236,7 +288,6 @@ fn parse_subtitle_xml(xml: &str) -> Result<Vec<TranscriptSegment>, ToolError> {
                     dur /= 1000.0;
                 }
 
-                // read_text consumes until the matching end tag, returning inner content
                 let inner = reader.read_text(e.name()).unwrap_or_default().into_owned();
                 let stripped = strip_xml_tags(&inner);
                 let text = normalize_ws(&stripped);

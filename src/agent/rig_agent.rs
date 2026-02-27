@@ -12,7 +12,7 @@ use rig::{
     completion::{CompletionModel, GetTokenUsage},
     streaming::{StreamedAssistantContent, StreamingPrompt},
 };
-use rustypipe::client::RustyPipe;
+use rusty_ytdl::search::YouTube;
 use std::sync::Arc;
 use tokio::sync::{RwLock, mpsc};
 
@@ -62,7 +62,7 @@ pub struct RigAgent<C: CompletionClient> {
     memory: Arc<MemoryManager>,
     scheduler: RwLock<Option<Arc<Scheduler>>>,
     http_client: reqwest::Client,
-    rp: Arc<RustyPipe>,
+    yt: Arc<YouTube>,
     client: C,
 }
 
@@ -73,7 +73,7 @@ impl<C: CompletionClient> RigAgent<C> {
             memory,
             scheduler: RwLock::new(None),
             http_client: reqwest::Client::new(),
-            rp: Arc::new(RustyPipe::new()),
+            yt: Arc::new(YouTube::new()?),
             client,
         }))
     }
@@ -109,10 +109,9 @@ impl<C: CompletionClient> RigAgent<C> {
                 client: self.http_client.clone(),
             })
             .tool(tools::SearchYouTube {
-                rp: self.rp.clone(),
+                yt: self.yt.clone(),
             })
             .tool(tools::GetTranscript {
-                rp: self.rp.clone(),
                 client: self.http_client.clone(),
             });
 
