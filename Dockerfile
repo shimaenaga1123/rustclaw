@@ -2,8 +2,8 @@ FROM --platform=$BUILDPLATFORM rust:slim AS builder
 RUN dpkg --add-architecture arm64 && \
     apt-get update && apt-get install -y \
     pkg-config \
-    g++ libssl-dev \
-    g++-aarch64-linux-gnu libc6-dev-arm64-cross libssl-dev:arm64 \
+    g++ \
+    g++-aarch64-linux-gnu libc6-dev-arm64-cross \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse
