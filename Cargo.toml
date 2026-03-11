@@ -10,7 +10,7 @@ license = "MIT"
 [dependencies]
 serenity = { git="https://github.com/serenity-rs/serenity", rev = "e114212", default-features = false, features = ["rustls_backend", "client", "gateway", "model", "cache"] }
 
-rig-core = { version = "0.31", default-features = false, features = ["reqwest-rustls"] }
+rig-core = { version = "0.32", default-features = false, features = ["reqwest-rustls"] }
 
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "fs", "sync", "time", "signal"] }
 tokio-cron-scheduler = "0.15"
@@ -41,8 +41,8 @@ sys-locale = "0.3"
 
 usearch = "2"
 
-sea-orm-sync = { version = "2.0.0-rc.36", default-features = false, features = ["rusqlite", "sync", "macros", "schema-sync"] }
-libsqlite3-sys = { version = "0.35", features = ["bundled"] }
+sea-orm-sync = { version = "2.0.0-rc.37", default-features = false, features = ["rusqlite", "sync", "macros", "schema-sync"] }
+libsqlite3-sys = { version = "0.36", features = ["bundled"] }
 
 once_cell = "1.21.3"
 
