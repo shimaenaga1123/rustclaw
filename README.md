@@ -10,7 +10,7 @@ Inspired by [NanoClaw](https://github.com/gavrielc/nanoclaw) and [OpenClaw](http
 - **Multi-Provider LLM** — Anthropic, OpenAI, Gemini via [Rig](https://github.com/0xPlaygrounds/rig)
 - **Vector Memory** — usearch (F16 HNSW) + SQLite semantic memory with recent turns + similarity search
 - **Pluggable Embeddings** — Local (fastembed, 384d) or Gemini API (768d, near-zero RAM)
-- **Sandboxed Execution** — All commands run in isolated Debian Docker containers (Bun pre-installed)
+- **Sandboxed Execution** — All commands run in isolated Docker containers (Python + Node.js pre-installed)
 - **Tool Calling** — Shell commands, web search, weather, YouTube search/transcript, Typst rendering, file sending, cron scheduler
 - **Owner/User Permissions** — AI-aware permission system for safe multi-user operation
 - **Auto-Update** — Daily binary updates via cargo-dist (systemd/launchd)

@@ -41,8 +41,8 @@ pub fn build_preamble(
     preamble.push_str(PREAMBLE_BEHAVIOR);
     preamble.push_str("# Tools\n");
     preamble.push_str(
-        "- **run_command**: Execute shell commands in a persistent Debian Docker container at /workspace. \
-         Bun pre-installed. Installed packages persist. For Python: `apt-get install -y python3`.\n",
+        "- **run_command**: Execute shell commands in a persistent Docker container at /workspace. \
+         Python and Node.js are pre-installed (`python3`, `node`, `npm`). Installed packages persist.\n",
     );
     preamble.push_str(
         "- **send_file**: Send a file from /workspace as a Discord attachment (max 8MB). \

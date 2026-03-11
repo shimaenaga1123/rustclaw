@@ -19,7 +19,7 @@ use std::time::Duration;
 use tokio::sync::Mutex;
 use tracing::{debug, info, warn};
 
-const SANDBOX_IMAGE: &str = "oven/bun:debian";
+const SANDBOX_IMAGE: &str = "nikolaik/python-nodejs:latest";
 const CONTAINER_NAME: &str = "rustclaw-sandbox";
 
 static CONTAINER_LOCK: std::sync::LazyLock<Mutex<()>> = std::sync::LazyLock::new(|| Mutex::new(()));
@@ -37,6 +37,43 @@ pub struct RunCommand {
 impl RunCommand {
     pub fn workspace_path(config: &Config) -> PathBuf {
         config.storage.data_dir.join("workspace")
+    }
+
+    async fn create_container(docker: &Docker) -> Result<(), ToolError> {
+        let volume_name = "rustclaw-workspace";
+        let bind = format!("{}:/workspace", volume_name);
+
+        let host_config = HostConfig {
+            binds: Some(vec![bind]),
+            ..Default::default()
+        };
+
+        let container_config = ContainerCreateBody {
+            image: Some(SANDBOX_IMAGE.to_string()),
+            cmd: Some(vec!["sleep".to_string(), "infinity".to_string()]),
+            working_dir: Some("/workspace".to_string()),
+            network_disabled: Some(false),
+            host_config: Some(host_config),
+            tty: Some(true),
+            ..Default::default()
+        };
+
+        let options = CreateContainerOptionsBuilder::new()
+            .name(CONTAINER_NAME)
+            .build();
+
+        docker
+            .create_container(Some(options), container_config)
+            .await
+            .map_err(|e| ToolError::CommandFailed(format!("Container creation failed: {}", e)))?;
+
+        docker
+            .start_container(CONTAINER_NAME, None)
+            .await
+            .map_err(|e| ToolError::CommandFailed(format!("Container start failed: {}", e)))?;
+
+        info!("Persistent sandbox container started");
+        Ok(())
     }
 
     async fn ensure_image(docker: &Docker) -> Result<(), ToolError> {
@@ -62,7 +99,39 @@ impl RunCommand {
 
         match docker.inspect_container(CONTAINER_NAME, None).await {
             Ok(info) => {
+                let current_image = info
+                    .config
+                    .as_ref()
+                    .and_then(|config| config.image.as_deref());
                 let running = info.state.as_ref().and_then(|s| s.running).unwrap_or(false);
+
+                if current_image != Some(SANDBOX_IMAGE) {
+                    info!(
+                        "Sandbox container image mismatch ({:?}), recreating with {}",
+                        current_image, SANDBOX_IMAGE
+                    );
+
+                    docker
+                        .stop_container(
+                            CONTAINER_NAME,
+                            Some(StopContainerOptionsBuilder::new().t(2).build()),
+                        )
+                        .await
+                        .ok();
+
+                    docker
+                        .remove_container(
+                            CONTAINER_NAME,
+                            Some(RemoveContainerOptionsBuilder::new().force(true).build()),
+                        )
+                        .await
+                        .map_err(|e| {
+                            ToolError::CommandFailed(format!("Container removal failed: {}", e))
+                        })?;
+
+                    Self::ensure_image(docker).await?;
+                    return Self::create_container(docker).await;
+                }
 
                 if !running {
                     info!("Sandbox container exists but not running, starting...");
@@ -80,45 +149,7 @@ impl RunCommand {
                 info!("Creating persistent sandbox container: {}", CONTAINER_NAME);
 
                 Self::ensure_image(docker).await?;
-
-                let volume_name = "rustclaw-workspace";
-                let bind = format!("{}:/workspace", volume_name);
-
-                let host_config = HostConfig {
-                    binds: Some(vec![bind]),
-                    ..Default::default()
-                };
-
-                let container_config = ContainerCreateBody {
-                    image: Some(SANDBOX_IMAGE.to_string()),
-                    cmd: Some(vec!["sleep".to_string(), "infinity".to_string()]),
-                    working_dir: Some("/workspace".to_string()),
-                    network_disabled: Some(false),
-                    host_config: Some(host_config),
-                    tty: Some(true),
-                    ..Default::default()
-                };
-
-                let options = CreateContainerOptionsBuilder::new()
-                    .name(CONTAINER_NAME)
-                    .build();
-
-                docker
-                    .create_container(Some(options), container_config)
-                    .await
-                    .map_err(|e| {
-                        ToolError::CommandFailed(format!("Container creation failed: {}", e))
-                    })?;
-
-                docker
-                    .start_container(CONTAINER_NAME, None)
-                    .await
-                    .map_err(|e| {
-                        ToolError::CommandFailed(format!("Container start failed: {}", e))
-                    })?;
-
-                info!("Persistent sandbox container started");
-                Ok(())
+                Self::create_container(docker).await
             }
         }
     }
@@ -247,16 +278,16 @@ impl Tool for RunCommand {
     async fn definition(&self, _prompt: String) -> ToolDefinition {
         ToolDefinition {
             name: Self::NAME.to_string(),
-            description: "Execute shell commands in a persistent Debian Docker container with Bun runtime. \
+            description: "Execute shell commands in a persistent Docker container with Python and Node.js pre-installed. \
                  Installed packages (apt-get install) and files persist across invocations. \
-                 The /workspace directory is the working directory. Bun is pre-installed. Use bun as Node.js runtime and package manager."
+                 The /workspace directory is the working directory. Use python/python3, node, npm, and npx directly."
                 .to_string(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "command": {
                         "type": "string",
-                        "description": "Command to execute in Debian container with Bun (shell: bash). Installed packages and files persist."
+                        "description": "Command to execute in the sandbox container (shell: bash). Python and Node.js are pre-installed. Installed packages and files persist."
                     }
                 },
                 "required": ["command"]
